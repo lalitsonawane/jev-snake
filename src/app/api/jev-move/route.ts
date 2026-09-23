@@ -83,15 +83,33 @@ export async function POST(req: NextRequest) {
 
   const payload = { model: MODEL, state, questions };
 
+  // Client abort (pause/reset/idle stop) must cancel the upstream TypeSafe call
+  // so lifecycle restarts cannot stack orphaned billable Jev requests.
+  if (req.signal.aborted) {
+    return new NextResponse(null, { status: 499 });
+  }
+
   const t0 = performance.now();
-  const res = await fetch(ENDPOINT, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  let res: Response;
+  try {
+    res = await fetch(ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: req.signal,
+    });
+  } catch (err) {
+    if (
+      req.signal.aborted ||
+      (err instanceof Error && err.name === "AbortError")
+    ) {
+      return new NextResponse(null, { status: 499 });
+    }
+    throw err;
+  }
   const latencyMs = Math.round(performance.now() - t0);
   const text = await res.text();
   let data: Record<string, unknown>;
