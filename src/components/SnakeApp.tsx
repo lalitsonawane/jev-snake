@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import {
   ALL_DIRS,
@@ -15,7 +14,6 @@ import {
   createGame,
   DEFAULT_H,
   DEFAULT_W,
-  foodHint,
   legalMoves,
   serializeState,
   type Dir,
@@ -42,10 +40,110 @@ type JevTick = {
   batch: boolean;
 };
 
+const OPP: Record<Dir, Dir> = {
+  up: "down",
+  down: "up",
+  left: "right",
+  right: "left",
+};
+
+const DIR_ARROW: Record<Dir, string> = {
+  up: "↑",
+  down: "↓",
+  left: "←",
+  right: "→",
+};
+
+type MoveTag = "safe" | "neck" | "body";
+
+function tagForMove(dir: Dir, currentDir: Dir, legalSet: Set<Dir>): MoveTag {
+  if (legalSet.has(dir)) return "safe";
+  if (dir === OPP[currentDir]) return "neck";
+  return "body";
+}
+
+function fmtPct(n: unknown, digits = 1) {
+  if (typeof n !== "number" || Number.isNaN(n)) return "—";
+  return `${(n * 100).toFixed(digits)}%`;
+}
+
+function asPair(v: unknown): [number, number] | null {
+  if (Array.isArray(v) && v.length >= 2 && typeof v[0] === "number" && typeof v[1] === "number") {
+    return [v[0], v[1]];
+  }
+  return null;
+}
+
+/** Compact view of last Jev I/O for the JSON panel — derived only from real request/response. */
+function buildCallView(jev: JevTick | null): {
+  head: [number, number] | null;
+  food: [number, number] | null;
+  payload: Record<string, unknown> | null;
+} {
+  if (!jev) return { head: null, food: null, payload: null };
+  const req = (jev.request && typeof jev.request === "object" ? jev.request : {}) as Record<
+    string,
+    unknown
+  >;
+  const res = jev.response || {};
+  const head = asPair(req.head);
+  const food = asPair(req.food);
+  const dx = typeof req.food_dx === "number" ? req.food_dx : null;
+  const dy = typeof req.food_dy === "number" ? req.food_dy : null;
+  const legal = Array.isArray(req.legal)
+    ? (req.legal as string[])
+    : Array.isArray(jev.legal)
+      ? jev.legal
+      : [];
+
+  const state: Record<string, unknown> = {
+    head: head ?? req.head ?? null,
+    food: food ?? req.food ?? null,
+    food_delta: dx != null && dy != null ? [dx, dy] : null,
+    safe_moves: legal,
+  };
+
+  const move: Record<string, unknown> = {
+    choice: res.choice ?? null,
+    confidence: typeof res.confidence === "number" ? res.confidence : null,
+  };
+
+  return {
+    head,
+    food,
+    payload: { state, move },
+  };
+}
+
+function highlightJson(value: unknown): string {
+  const raw = JSON.stringify(value, null, 2);
+  // Escape HTML then color tokens
+  const esc = raw
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return esc.replace(
+    /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false)\b|\b(null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],]/g,
+    (match, str, colon, bool, nul) => {
+      if (str !== undefined) {
+        if (colon !== undefined) {
+          return `<span class="jk">${str}</span>${colon}`;
+        }
+        return `<span class="js">${str}</span>`;
+      }
+      if (bool !== undefined) return `<span class="jb">${bool}</span>`;
+      if (nul !== undefined) return `<span class="jnul">${nul}</span>`;
+      if (/^-?\d/.test(match)) return `<span class="jn">${match}</span>`;
+      return `<span class="jp">${match}</span>`;
+    },
+  );
+}
+
 export default function SnakeApp() {
   const [game, setGame] = useState<Game>(() => createGame(DEFAULT_W, DEFAULT_H));
   const [running, setRunning] = useState(false);
   const [batch, setBatch] = useState(false);
+  const [gearOpen, setGearOpen] = useState(false);
   const [jev, setJev] = useState<JevTick | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tickMs, setTickMs] = useState(0);
@@ -55,6 +153,7 @@ export default function SnakeApp() {
   const busyRef = useRef(false);
   const batchRef = useRef(false);
   const lastActiveRef = useRef(Date.now());
+  const gearRef = useRef<HTMLDivElement | null>(null);
   /** Autoplay stops after this many ms with no user activity / hidden tab. */
   const IDLE_MS = 90_000;
 
@@ -86,7 +185,7 @@ export default function SnakeApp() {
     window.addEventListener("scroll", onAct, { passive: true });
     const id = window.setInterval(() => {
       if (!runningRef.current) return;
-      if (document.hidden) return; // visibility handler already stops
+      if (document.hidden) return;
       if (Date.now() - lastActiveRef.current < IDLE_MS) return;
       runningRef.current = false;
       setRunning(false);
@@ -101,6 +200,18 @@ export default function SnakeApp() {
       window.clearInterval(id);
     };
   }, [bumpActivity]);
+
+  // Close gear menu on outside click
+  useEffect(() => {
+    if (!gearOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (gearRef.current && !gearRef.current.contains(e.target as Node)) {
+        setGearOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [gearOpen]);
 
   const reset = useCallback(() => {
     runningRef.current = false;
@@ -189,7 +300,6 @@ export default function SnakeApp() {
         return false;
       }
 
-      // One combined paint: apply move then publish Jev (game first for board, jev second)
       const next = applyMove(g, move);
       gameRef.current = next;
       setGame(next);
@@ -244,137 +354,150 @@ export default function SnakeApp() {
     setRunning(next);
   };
 
-  const cells = game.width * game.height;
   const legal = jev?.legal || legalMoves(game);
   const legalSet = useMemo(() => new Set(legal), [legal]);
   const probs = jev?.response?.probabilities || {};
-  const scores = jev?.response?.scores;
-  const chosen = (jev?.response?.choice as string) || "—";
-  const hint = useMemo(() => foodHint(game.snake[0], game.food), [game.snake, game.food]);
-  const ch = game.challenges;
-  const danger = legal.length <= 1 && game.status === "playing";
+  const chosen = (jev?.response?.choice as string) || "";
+  const chosenPct =
+    chosen && typeof probs[chosen] === "number" ? fmtPct(probs[chosen]) : null;
 
-  // Stable JSON strings — only recompute when completed payload changes
-  const reqJson = useMemo(
-    () => (jev?.request != null ? JSON.stringify(jev.request, null, 2) : ""),
-    [jev?.request],
+  const statusKind =
+    game.status === "won"
+      ? "won"
+      : game.status === "lost"
+        ? "collision"
+        : running
+          ? "running"
+          : "idle";
+
+  const statusLabel =
+    statusKind === "won"
+      ? "Won"
+      : statusKind === "collision"
+        ? "Collision"
+        : statusKind === "running"
+          ? "Running"
+          : "Idle";
+
+  const callView = useMemo(() => buildCallView(jev), [jev]);
+  const jsonHtml = useMemo(
+    () => (callView.payload ? highlightJson(callView.payload) : ""),
+    [callView.payload],
   );
-  const resJson = useMemo(
-    () => (jev?.response != null ? JSON.stringify(jev.response, null, 2) : ""),
-    [jev?.response],
-  );
+
+  const headMeta = callView.head ? `[${callView.head[0]}, ${callView.head[1]}]` : "—";
+  const foodMeta = callView.food ? `[${callView.food[0]}, ${callView.food[1]}]` : "—";
 
   return (
     <div className="app">
       <header className="app-header">
-        <div>
-          <h1>Jev Snake</h1>
-          <p className="sub">
-            Hunt food · fill the board ({DEFAULT_W}×{DEFAULT_H}) · every move via TypeSafe Jev
-          </p>
+        <div className="header-left">
+          <h1>jev / snake</h1>
+          <span className={`status-pill ${statusKind}`}>
+            <span className="status-dot" aria-hidden />
+            {statusLabel}
+          </span>
         </div>
-        <div className="controls">
-          <button className="btn" onClick={toggleRun} disabled={game.status !== "playing"}>
-            {running ? "Pause" : "Autoplay"}
-          </button>
+
+        <div className="header-metrics">
+          <span className="metric score">
+            <span className="metric-label">Score</span>
+            <span className="metric-value">{game.challenges.score}</span>
+          </span>
+          <span className="metric step">
+            <span className="metric-label">Step</span>
+            <span className="metric-value">{game.ticks}</span>
+          </span>
+          <span className="metric latency">
+            <span className="metric-label">Latency</span>
+            <span className="metric-value">
+              {jev?.latencyMs != null ? `${jev.latencyMs} ms` : "—"}
+            </span>
+          </span>
+        </div>
+
+        <div className="header-right">
           <button
-            className="btn"
-            onClick={() => void step()}
-            disabled={running || game.status !== "playing"}
+            className="btn btn-primary"
+            onClick={toggleRun}
+            disabled={game.status !== "playing"}
           >
-            Step
+            {running ? "Pause" : "Start"}
           </button>
-          <button className="btn btn-secondary" onClick={reset}>
+          <button className="btn btn-outline" onClick={reset}>
             Reset
           </button>
-          <label className={"toggle" + (batch ? " on" : "")}>
-            <input
-              type="checkbox"
-              checked={batch}
-              onChange={(e) => setBatch(e.target.checked)}
-            />
-            Batch foresight
-          </label>
-          <label className="field">
-            extra delay
-            <input
-              type="number"
-              value={tickMs}
-              min={0}
-              step={25}
-              onChange={(e) => setTickMs(Math.max(0, Number(e.target.value) || 0))}
-            />
-            ms
-          </label>
+          <div className="btn-gear-wrap" ref={gearRef} style={{ position: "relative" }}>
+            <button
+              type="button"
+              className={"btn btn-gear" + (batch ? " on" : "")}
+              aria-label="Settings"
+              title="Settings"
+              onClick={() => setGearOpen((o) => !o)}
+            >
+              ⚙
+            </button>
+            {gearOpen && (
+              <div className="gear-menu">
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={batch}
+                    onChange={(e) => setBatch(e.target.checked)}
+                  />
+                  Batch foresight
+                </label>
+                <label>
+                  Delay
+                  <input
+                    type="number"
+                    value={tickMs}
+                    min={0}
+                    step={25}
+                    onChange={(e) => setTickMs(Math.max(0, Number(e.target.value) || 0))}
+                    style={{
+                      width: 64,
+                      marginLeft: 4,
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 6,
+                      padding: "2px 6px",
+                    }}
+                  />
+                  <span className="muted">ms</span>
+                </label>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      {(game.status !== "playing" || error) && (
-        <div
-          className={
-            "banner " +
-            (error ? "banner-err" : game.status === "won" ? "banner-win" : "banner-lost")
-          }
-        >
-          {error
-            ? `Autoplay paused — ${error}`
-            : game.status === "won"
-              ? `WIN — board filled! Score ${ch.score} · ${ch.foodsEaten} foods · ${game.ticks} ticks`
-              : `LOST at tick ${game.ticks} · score ${ch.score}`}
-        </div>
-      )}
+      {error && <div className="error-banner">{error}</div>}
 
       <div className="main">
-        <BoardPanel
-          game={game}
-          cells={cells}
-          danger={danger}
-          huntText={
-            hint.dist == null
-              ? "—"
-              : `${hint.dist} away · prefer ${hint.prefer.join("/") || "—"}`
-          }
-        />
+        <BoardPanel game={game} />
 
-        <DashPanel
-          chosen={chosen}
-          latencyMs={jev?.latencyMs}
-          confidence={jev?.response?.confidence}
-          phase={jev?.phase ?? "idle"}
-          cells={cells}
-          snakeLen={game.snake.length}
-          challenges={ch}
+        <ProbsPanel
           probs={probs}
-          scores={scores}
-          foresight={jev?.response?.foresight}
+          chosen={chosen}
+          chosenPct={chosenPct}
           legalSet={legalSet}
-          batch={batch || Boolean(jev?.batch)}
+          currentDir={game.dir}
         />
       </div>
 
-      <RawPanel
-        phase={jev?.phase ?? "idle"}
-        reqJson={reqJson}
-        resJson={resJson}
+      <JsonPanel
+        headMeta={headMeta}
+        foodMeta={foodMeta}
+        html={jsonHtml}
         empty={!jev}
       />
     </div>
   );
 }
 
-/* ---------- memoized panels (stable layout, update highlights/numbers only) ---------- */
+/* ---------- memoized panels ---------- */
 
-const BoardPanel = memo(function BoardPanel({
-  game,
-  cells,
-  danger,
-  huntText,
-}: {
-  game: Game;
-  cells: number;
-  danger: boolean;
-  huntText: string;
-}) {
+const BoardPanel = memo(function BoardPanel({ game }: { game: Game }) {
   const occupied = useMemo(() => {
     const map = new Map<string, "H" | "o" | "*">();
     for (let i = game.snake.length - 1; i >= 0; i--) {
@@ -387,121 +510,83 @@ const BoardPanel = memo(function BoardPanel({
 
   return (
     <section className="panel board-panel">
-      <div className="panel-meta">
-        <span>
-          tick {game.ticks} · {game.status}
-          {danger ? " · ⚠ danger" : ""}
-        </span>
-        <span>
-          len {game.snake.length}/{cells}
-        </span>
-      </div>
       <div
         className="board"
         style={{ gridTemplateColumns: `repeat(${game.width}, var(--cell))` }}
+        aria-label="Snake board"
       >
         {Array.from({ length: game.height }, (_, y) =>
           Array.from({ length: game.width }, (_, x) => {
             const c = occupied.get(`${x},${y}`);
-            const kind =
-              c === "H"
-                ? "cell-head"
-                : c === "o"
-                  ? "cell-body"
-                  : c === "*"
-                    ? "cell-food"
-                    : "cell-empty";
-            return <div key={`${x}-${y}`} className={`cell ${kind}`} />;
+            if (c === "H") {
+              return (
+                <div key={`${x}-${y}`} className={`cell cell-head dir-${game.dir}`}>
+                  <span className="eye eye-a" />
+                  <span className="eye eye-b" />
+                </div>
+              );
+            }
+            if (c === "o") {
+              return <div key={`${x}-${y}`} className="cell cell-body" />;
+            }
+            if (c === "*") {
+              return (
+                <div key={`${x}-${y}`} className="cell cell-food-wrap">
+                  <span className="food-dot" />
+                </div>
+              );
+            }
+            return <div key={`${x}-${y}`} className="cell cell-empty" />;
           }),
         )}
       </div>
-      <div className="hunt-line">Target food: {huntText}</div>
     </section>
   );
 });
 
-const DashPanel = memo(function DashPanel({
-  chosen,
-  latencyMs,
-  confidence,
-  phase,
-  cells,
-  snakeLen,
-  challenges: ch,
+const ProbsPanel = memo(function ProbsPanel({
   probs,
-  scores,
-  foresight,
+  chosen,
+  chosenPct,
   legalSet,
-  batch,
+  currentDir,
 }: {
-  chosen: string;
-  latencyMs?: number;
-  confidence?: number;
-  phase: string;
-  cells: number;
-  snakeLen: number;
-  challenges: Game["challenges"];
   probs: Record<string, number>;
-  scores?: JevResponse["scores"];
-  foresight?: JevResponse["foresight"];
+  chosen: string;
+  chosenPct: string | null;
   legalSet: Set<Dir>;
-  batch: boolean;
+  currentDir: Dir;
 }) {
+  const choiceText =
+    chosen && chosenPct ? `choice: ${chosen} (${chosenPct})` : chosen ? `choice: ${chosen}` : "choice: —";
+
   return (
-    <section className="panel dash-panel">
-      <div className="panel-title">Dashboard</div>
-      <div className="dash-grid">
-        <DashStat label="Chosen move" value={String(chosen).toUpperCase()} big />
-        <DashStat label="Latency" value={`${latencyMs ?? "—"} ms`} />
-        <DashStat label="Length / goal" value={`${snakeLen} / ${cells}`} />
-        <DashStat label="Confidence" value={fmtPct(confidence)} />
-        <DashStat label="Phase" value={phase} />
-        <DashStat
-          label="Foresight"
-          value={batch ? String(foresight?.choice ?? "—").toUpperCase() : "off"}
-        />
+    <section className="panel probs-panel">
+      <div className="panel-head">
+        <h2 className="panel-title">Move Probabilities</h2>
+        <span className="panel-meta">{choiceText}</span>
       </div>
-
-      <div className="panel-title challenge-title">Challenges</div>
-      <div className="dash-grid">
-        <DashStat label="Score" value={String(ch.score)} big />
-        <DashStat label="Level" value={`L${ch.level}`} />
-        <DashStat label="Foods eaten" value={String(ch.foodsEaten)} />
-        <DashStat label="Food streak" value={String(ch.foodStreak)} />
-        <DashStat label="Ticks to food" value={String(ch.ticksSinceFood)} />
-        <DashStat
-          label="Best food time"
-          value={ch.bestFoodTicks == null ? "—" : `${ch.bestFoodTicks}t`}
-        />
-        <DashStat label="Near-misses" value={String(ch.nearMisses)} />
-        <DashStat label="Fill %" value={`${Math.round((snakeLen / cells) * 100)}%`} />
-      </div>
-
-      <div className="prob-heading">
-        All moves (fixed){batch ? " · batch scores" : ""} — illegal disabled
-      </div>
-      <div className="prob-list fixed">
+      <div className="prob-list">
         {ALL_DIRS.map((m) => {
           const ok = legalSet.has(m);
           const p = ok ? Number(probs[m] ?? 0) : 0;
-          const active = ok && m === chosen;
-          const sc = scores?.[m]?.score;
+          const active = Boolean(chosen) && m === chosen;
+          const tag = tagForMove(m, currentDir, legalSet);
+          const pctStr = ok ? fmtPct(p) : "0.0%";
+          const widthPct = ok ? Math.max(0, Math.min(100, p * 100)) : 0;
           return (
-            <div key={m} className={"prob-row" + (ok ? "" : " disabled")}>
-              <span className={"prob-name" + (active ? " active" : "")}>
+            <div key={m} className={"prob-row" + (active ? " chosen" : "")}>
+              <span className="prob-label">
+                <span className="arrow" aria-hidden>
+                  {DIR_ARROW[m]}
+                </span>
                 {m}
-                {!ok ? " ✕" : ""}
               </span>
               <div className="prob-track">
-                <div
-                  className={"prob-fill" + (active ? " active" : "")}
-                  style={{ width: `${Math.max(0, Math.min(100, p * 100))}%` }}
-                />
+                <div className="prob-fill" style={{ width: `${widthPct}%` }} />
               </div>
-              <span className="prob-pct">
-                {ok ? fmtPct(p) : "—"}
-                {batch && ok && typeof sc === "number" ? ` · s${sc.toFixed(2)}` : ""}
-              </span>
+              <span className="prob-pct">{pctStr}</span>
+              <span className={`prob-tag ${tag}`}>{tag}</span>
             </div>
           );
         })}
@@ -510,58 +595,31 @@ const DashPanel = memo(function DashPanel({
   );
 });
 
-const RawPanel = memo(function RawPanel({
-  phase,
-  reqJson,
-  resJson,
+const JsonPanel = memo(function JsonPanel({
+  headMeta,
+  foodMeta,
+  html,
   empty,
 }: {
-  phase: string;
-  reqJson: string;
-  resJson: string;
+  headMeta: string;
+  foodMeta: string;
+  html: string;
   empty: boolean;
 }) {
   return (
-    <details className="panel raw-panel" open>
-      <summary>
-        Raw Jev I/O <span className="muted">· {phase}</span>
-      </summary>
+    <section className="panel json-panel">
+      <div className="panel-head">
+        <h2 className="panel-title">Last /v1/systemone Call</h2>
+        <span className="panel-meta">
+          head {headMeta} · food {foodMeta}
+        </span>
+      </div>
       {empty ? (
-        <div className="muted">Waiting for first tick…</div>
+        <pre className="json-body json-empty">Waiting for first tick…</pre>
       ) : (
-        <div className="raw-split">
-          <div>
-            <div className="raw-label">REQUEST</div>
-            <pre className="raw-pre">{reqJson}</pre>
-          </div>
-          <div>
-            <div className="raw-label">RESPONSE</div>
-            <pre className="raw-pre">{resJson}</pre>
-          </div>
-        </div>
+        <pre className="json-body" dangerouslySetInnerHTML={{ __html: html }} />
       )}
-    </details>
+    </section>
   );
 });
 
-function DashStat({
-  label,
-  value,
-  big,
-}: {
-  label: string;
-  value: string;
-  big?: boolean;
-}) {
-  return (
-    <div className="dash-stat">
-      <div className="label">{label}</div>
-      <div className={"value" + (big ? " big" : "")}>{value}</div>
-    </div>
-  );
-}
-
-function fmtPct(n: unknown) {
-  if (typeof n !== "number" || Number.isNaN(n)) return "—";
-  return `${(n * 100).toFixed(1)}%`;
-}
