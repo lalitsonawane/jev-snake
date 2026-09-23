@@ -90,6 +90,8 @@ stateDiagram-v2
 
 `TYPESAFE_API_KEY` (alias `TYPE_SAFE_API_KEY`) is read **only** in `src/app/api/jev-move/route.ts`. Never sent to the browser.
 
+Pause/reset aborts the browser `fetch` to `/api/jev-move`; the route forwards `req.signal` so the upstream TypeSafe call is cancelled too (no orphaned billable Jev requests).
+
 ## Local
 
 ```bash
