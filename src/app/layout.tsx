@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Jev Snake",
+  title: "jev / snake",
   description: "Snake autoplay powered by TypeSafe Jev (systemone)",
 };
 
