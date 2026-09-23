@@ -416,29 +416,32 @@ export default function SnakeApp() {
           </span>
         </div>
 
-        <div className="header-right">
+        <div className="header-right" role="toolbar" aria-label="Game controls">
           <button
+            type="button"
             className="btn btn-primary"
             onClick={toggleRun}
             disabled={game.status !== "playing"}
+            aria-pressed={running}
           >
             {running ? "Pause" : "Start"}
           </button>
-          <button className="btn btn-outline" onClick={reset}>
+          <button type="button" className="btn btn-outline" onClick={reset}>
             Reset
           </button>
-          <div className="btn-gear-wrap" ref={gearRef} style={{ position: "relative" }}>
+          <div className="btn-gear-wrap" ref={gearRef}>
             <button
               type="button"
               className={"btn btn-gear" + (batch ? " on" : "")}
               aria-label="Settings"
+              aria-expanded={gearOpen}
               title="Settings"
               onClick={() => setGearOpen((o) => !o)}
             >
               ⚙
             </button>
             {gearOpen && (
-              <div className="gear-menu">
+              <div className="gear-menu" role="menu">
                 <label>
                   <input
                     type="checkbox"
@@ -455,13 +458,6 @@ export default function SnakeApp() {
                     min={0}
                     step={25}
                     onChange={(e) => setTickMs(Math.max(0, Number(e.target.value) || 0))}
-                    style={{
-                      width: 64,
-                      marginLeft: 4,
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 6,
-                      padding: "2px 6px",
-                    }}
                   />
                   <span className="muted">ms</span>
                 </label>
@@ -512,7 +508,11 @@ const BoardPanel = memo(function BoardPanel({ game }: { game: Game }) {
     <section className="panel board-panel">
       <div
         className="board"
-        style={{ gridTemplateColumns: `repeat(${game.width}, var(--cell))` }}
+        style={{
+          gridTemplateColumns: `repeat(${game.width}, var(--cell))`,
+          ["--cols" as string]: String(game.width),
+          ["--rows" as string]: String(game.height),
+        }}
         aria-label="Snake board"
       >
         {Array.from({ length: game.height }, (_, y) =>

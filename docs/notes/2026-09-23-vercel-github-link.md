@@ -5,7 +5,7 @@
 Connected `github.com/lalitsonawane/jev-snake` to a new Vercel project so pushes to `main` deploy automatically. The previous upload/cloud-copy project was renamed and left as a backup (env vars retained there).
 
 Repo mirror: `docs/notes/2026-09-23-vercel-github-link.md`  
-Notion: (see `docs/notion-sync.md`)
+Notion: https://app.notion.com/p/3e489f54d2c28126b5c6cbba3fb96f2c
 
 ## Key decisions
 
@@ -21,6 +21,11 @@ Notion: (see `docs/notion-sync.md`)
 - Git branch alias: https://jev-snake-git-main-apptonics-projects.vercel.app
 - Backup (cloud copy): https://vercel.com/apptonics-projects/jev-snake-cloud-copy
 - First GitHub-backed deployment: `dpl_EAZCzZgJ5uLpm1bGMzgv2V1J9rq8` (READY, commit `2960bf3` on `main`)
+
+## Follow-up (same session)
+
+- Made layout responsive: removed 1040px `min-width` locks that pushed Start/Reset off-screen on phones; stacked header controls full-width on mobile; scaled board cells with viewport.
+- Disabled Vercel Authentication (SSO) on the project so `*.vercel.app` is publicly usable without a Vercel login.
 
 ## Open follow-ups
 

@@ -17,11 +17,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: 1040px;
-  min-width: 1040px;
+  width: min(1040px, 100%);
   max-width: 1040px;
   margin: 0 auto;
-  padding: 18px 16px 28px;
+  padding: 14px 12px 28px;
 }
 
 /* ---------- Header ---------- */
@@ -38,6 +37,7 @@ body {
   align-items: center;
   gap: 10px;
   justify-self: start;
+  min-width: 0;
 }
 
 .header-left h1 {
@@ -91,9 +91,9 @@ body {
   min-width: 0;
 }
 
-.metric.score { min-width: 88px; }
-.metric.step { min-width: 80px; }
-.metric.latency { min-width: 130px; }
+.metric.score { min-width: 72px; }
+.metric.step { min-width: 64px; }
+.metric.latency { min-width: 110px; }
 
 .metric-label {
   font-size: 0.78rem;
@@ -124,6 +124,7 @@ body {
   font-size: 0.875rem;
   line-height: 1.2;
   transition: background 80ms ease, opacity 80ms ease;
+  touch-action: manipulation;
 }
 
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
@@ -164,6 +165,8 @@ body {
   background: #eff6ff;
 }
 
+.btn-gear-wrap { position: relative; }
+
 .gear-menu {
   position: absolute;
   top: calc(100% + 6px);
@@ -191,6 +194,13 @@ body {
 }
 
 .gear-menu input[type="checkbox"] { accent-color: #2563eb; }
+.gear-menu input[type="number"] {
+  width: 64px;
+  margin-left: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
 
 .error-banner {
   padding: 10px 12px;
@@ -205,12 +215,10 @@ body {
 /* ---------- Body: board | probs ---------- */
 .main {
   display: grid;
-  grid-template-columns: 540px 420px;
+  grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
   gap: 16px;
   align-items: start;
-  width: 1008px;
-  min-width: 1008px;
-  max-width: 1008px;
+  width: 100%;
 }
 
 .panel {
@@ -220,11 +228,11 @@ body {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   overflow: hidden;
   contain: layout style;
+  min-width: 0;
 }
 
 .board-panel {
-  width: 540px;
-  min-width: 540px;
+  width: 100%;
   max-width: 540px;
   padding: 16px;
   display: flex;
@@ -233,12 +241,15 @@ body {
 }
 
 .board {
-  --cell: 40px;
+  --cols: 12;
+  --rows: 12;
+  --cell: clamp(22px, calc((100vw - 56px) / var(--cols)), 40px);
   --gap: 1px;
   display: grid;
   gap: var(--gap);
-  width: calc(12 * var(--cell) + 11 * var(--gap));
-  height: calc(12 * var(--cell) + 11 * var(--gap));
+  width: calc(var(--cols) * var(--cell) + (var(--cols) - 1) * var(--gap));
+  height: calc(var(--rows) * var(--cell) + (var(--rows) - 1) * var(--gap));
+  max-width: 100%;
   background: #e5e7eb;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
@@ -285,8 +296,8 @@ body {
 }
 
 .food-dot {
-  width: 18px;
-  height: 18px;
+  width: calc(var(--cell) * 0.45);
+  height: calc(var(--cell) * 0.45);
   border-radius: 50%;
   background: #22c55e;
 }
@@ -295,33 +306,38 @@ body {
 .eye {
   z-index: 2;
   position: absolute;
-  width: 5px;
-  height: 5px;
+  width: max(4px, calc(var(--cell) * 0.125));
+  height: max(4px, calc(var(--cell) * 0.125));
   border-radius: 50%;
   background: #fff;
   pointer-events: none;
 }
 
-.cell-head.dir-right .eye-a { top: 8px; right: 7px; }
-.cell-head.dir-right .eye-b { bottom: 8px; right: 7px; }
-.cell-head.dir-left .eye-a { top: 8px; left: 7px; }
-.cell-head.dir-left .eye-b { bottom: 8px; left: 7px; }
-.cell-head.dir-up .eye-a { top: 7px; left: 8px; }
-.cell-head.dir-up .eye-b { top: 7px; right: 8px; }
-.cell-head.dir-down .eye-a { bottom: 7px; left: 8px; }
-.cell-head.dir-down .eye-b { bottom: 7px; right: 8px; }
+.cell-head.dir-right .eye-a { top: 20%; right: 18%; }
+.cell-head.dir-right .eye-b { bottom: 20%; right: 18%; }
+.cell-head.dir-left .eye-a { top: 20%; left: 18%; }
+.cell-head.dir-left .eye-b { bottom: 20%; left: 18%; }
+.cell-head.dir-up .eye-a { top: 18%; left: 20%; }
+.cell-head.dir-up .eye-b { top: 18%; right: 20%; }
+.cell-head.dir-down .eye-a { bottom: 18%; left: 20%; }
+.cell-head.dir-down .eye-b { bottom: 18%; right: 20%; }
 
 /* ---------- Move Probabilities ---------- */
 .probs-panel {
-  width: 420px;
-  min-width: 420px;
+  width: 100%;
   max-width: 420px;
-  height: 540px;
-  min-height: 540px;
-  max-height: 540px;
+  min-height: 0;
+  height: auto;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
+}
+
+@media (min-width: 900px) {
+  .probs-panel {
+    height: 540px;
+    max-height: 540px;
+  }
 }
 
 .panel-head {
@@ -331,6 +347,7 @@ body {
   gap: 10px;
   margin-bottom: 14px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .panel-title {
@@ -359,12 +376,10 @@ body {
 
 .prob-row {
   display: grid;
-  grid-template-columns: 72px 1fr 52px 44px;
+  grid-template-columns: 72px minmax(0, 1fr) 52px 44px;
   align-items: center;
   gap: 10px;
-  height: 28px;
   min-height: 28px;
-  max-height: 28px;
 }
 
 .prob-label {
@@ -374,9 +389,6 @@ body {
   font-size: 0.82rem;
   color: #374151;
   font-weight: 500;
-  width: 72px;
-  min-width: 72px;
-  max-width: 72px;
 }
 
 .prob-label .arrow {
@@ -394,8 +406,7 @@ body {
 .prob-row.chosen .prob-label .arrow { color: #2563eb; }
 
 .prob-track {
-  width: 180px;
-  min-width: 180px;
+  width: 100%;
   max-width: 180px;
   height: 8px;
   background: #f3f4f6;
@@ -422,18 +433,12 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   color: #6b7280;
   text-align: right;
-  width: 52px;
-  min-width: 52px;
-  max-width: 52px;
 }
 
 .prob-tag {
   font-size: 0.75rem;
   font-weight: 600;
   text-align: right;
-  width: 44px;
-  min-width: 44px;
-  max-width: 44px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -443,13 +448,11 @@ body {
 
 /* ---------- Full-width JSON under board+probs ---------- */
 .json-panel {
-  width: 1008px;
-  min-width: 1008px;
-  max-width: 1008px;
+  width: 100%;
   padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;
-  min-height: 280px;
+  min-height: 200px;
 }
 
 .json-panel .panel-head {
@@ -459,8 +462,7 @@ body {
 .json-body {
   margin: 0;
   flex: 1;
-  min-height: 240px;
-  height: 280px;
+  min-height: 180px;
   max-height: 320px;
   overflow: auto;
   background: #fafafa;
@@ -473,6 +475,7 @@ body {
   color: #111827;
   white-space: pre;
   font-variant-numeric: tabular-nums;
+  -webkit-overflow-scrolling: touch;
 }
 
 .json-body .jk { color: #2563eb; }
@@ -488,3 +491,110 @@ body {
 }
 
 .muted { color: #6b7280; font-size: 0.75rem; }
+
+/* ---------- Mobile / tablet ---------- */
+@media (max-width: 899px) {
+  .app {
+    gap: 12px;
+    padding: 12px 10px 24px;
+  }
+
+  .app-header {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .header-left {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .header-metrics {
+    justify-self: stretch;
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+  }
+
+  .metric.score,
+  .metric.step,
+  .metric.latency {
+    min-width: 0;
+  }
+
+  .header-right {
+    justify-self: stretch;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px;
+  }
+
+  .header-right .btn {
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .header-right .btn-primary,
+  .header-right .btn-outline {
+    min-width: 0;
+  }
+
+  .btn-gear {
+    width: 44px;
+    height: 44px;
+  }
+
+  .main {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .board-panel {
+    max-width: none;
+    padding: 12px;
+  }
+
+  .board {
+    --cell: clamp(20px, calc((100vw - 48px) / var(--cols)), 36px);
+  }
+
+  .probs-panel {
+    max-width: none;
+  }
+
+  .panel-meta {
+    white-space: normal;
+  }
+
+  .prob-row {
+    grid-template-columns: 64px minmax(0, 1fr) 48px 40px;
+    gap: 8px;
+  }
+
+  .prob-track {
+    max-width: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .header-left h1 {
+    font-size: 0.95rem;
+  }
+
+  .metric-label {
+    font-size: 0.7rem;
+  }
+
+  .metric-value {
+    font-size: 0.82rem;
+  }
+
+  .prob-row {
+    grid-template-columns: 56px minmax(0, 1fr) 44px 36px;
+  }
+}
