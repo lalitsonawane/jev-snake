@@ -4,7 +4,7 @@ const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 const MODEL = "jev-latest";
 
 function apiKey() {
-  return process.env.TYPESAFE_API_KEY || process.env.TYPESAFE_API_KEY || "";
+  return process.env.TYPESAFE_API_KEY || process.env.TYPE_SAFE_API_KEY || "";
 }
 
 export async function POST(req: NextRequest) {
