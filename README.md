@@ -8,6 +8,8 @@ Board fill: snake length === width × height.
 ## Security
 `TYPESAFE_API_KEY` is read **only** in `src/app/api/jev-move/route.ts` (server). Never sent to the browser.
 
+Pause/reset aborts the browser `fetch` to `/api/jev-move`; the route forwards `req.signal` so the upstream TypeSafe call is cancelled too (no orphaned billable Jev requests).
+
 ## Local
 ```bash
 export TYPESAFE_API_KEY=...
