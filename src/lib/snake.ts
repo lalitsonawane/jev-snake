@@ -102,6 +102,38 @@ export function legalMoves(game: Game): Dir[] {
   return out;
 }
 
+/**
+ * Returns the number of moves to food when `move` is an exact, unobstructed
+ * straight shot. This is deliberately conservative: every current body cell
+ * blocks the corridor, even if the tail might move before the head reaches it.
+ */
+export function straightShotSteps(game: Game, move: Dir): number | null {
+  if (game.status !== "playing" || !game.food) return null;
+
+  const head = game.snake[0];
+  const delta = DIRS[move];
+  const dx = game.food.x - head.x;
+  const dy = game.food.y - head.y;
+  const steps =
+    delta.x !== 0 && dy === 0 && Math.sign(dx) === delta.x
+      ? Math.abs(dx)
+      : delta.y !== 0 && dx === 0 && Math.sign(dy) === delta.y
+        ? Math.abs(dy)
+        : 0;
+  if (steps === 0) return null;
+
+  const body = new Set(game.snake.slice(1).map(key));
+  for (let step = 1; step <= steps; step += 1) {
+    const x = head.x + delta.x * step;
+    const y = head.y + delta.y * step;
+    if (x < 0 || y < 0 || x >= game.width || y >= game.height || body.has(`${x},${y}`)) {
+      return null;
+    }
+  }
+
+  return steps;
+}
+
 function manhattan(a: Pt, b: Pt) {
   return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 }

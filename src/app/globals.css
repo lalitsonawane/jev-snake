@@ -365,6 +365,13 @@ body {
   white-space: nowrap;
 }
 
+.held-indicator {
+  display: inline-block;
+  margin-right: 10px;
+  color: #2563eb;
+  font-weight: 650;
+}
+
 .prob-list {
   display: flex;
   flex-direction: column;
