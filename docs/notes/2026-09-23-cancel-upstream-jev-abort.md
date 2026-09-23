@@ -1,5 +1,8 @@
 # 2026-09-23 — Cancel upstream Jev on client abort
 
+## Outcome
+Verified P1 hypothesis from the unfinished PR #4 review: client pause/reset aborted `/api/jev-move`, but the Route Handler’s TypeSafe `fetch` had no `AbortSignal`, so upstream Jev could still complete and bill. Fixed by forwarding `req.signal` to `POST https://api.typesafe.ai/v1/systemone`.
+
 Repo mirror: `docs/notes/2026-09-23-cancel-upstream-jev-abort.md`  
 Notion: https://app.notion.com/p/3e489f54d2c2814cbebdfc97ac914ca2
 
