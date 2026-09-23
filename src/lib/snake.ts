@@ -1,6 +1,8 @@
 export type Dir = "up" | "down" | "left" | "right";
 export type Pt = { x: number; y: number };
 
+export type LossReason = "wall" | "self" | "trapped";
+
 export type Challenges = {
   score: number;
   foodsEaten: number;
@@ -18,6 +20,8 @@ export type Game = {
   dir: Dir;
   food: Pt | null;
   status: "playing" | "won" | "lost";
+  /** Set when status becomes "lost" — classic self-crash vs wall vs no legal moves. */
+  lossReason?: LossReason | null;
   ticks: number;
   challenges: Challenges;
 };
@@ -81,6 +85,7 @@ export function createGame(width = DEFAULT_W, height = DEFAULT_H): Game {
     dir: "right",
     food: placeFood(width, height, snake, "deterministic"),
     status: "playing",
+    lossReason: null,
     ticks: 0,
     challenges: emptyChallenges(),
   };
@@ -188,12 +193,12 @@ export function applyMove(game: Game, move: Dir): Game {
   };
 
   if (next.x < 0 || next.y < 0 || next.x >= game.width || next.y >= game.height) {
-    return { ...base, status: "lost" };
+    return { ...base, status: "lost", lossReason: "wall" };
   }
   const willGrow = !!(game.food && next.x === game.food.x && next.y === game.food.y);
   const bodyCheck = willGrow ? game.snake : game.snake.slice(0, -1);
   if (bodyCheck.some((p) => p.x === next.x && p.y === next.y)) {
-    return { ...base, status: "lost" };
+    return { ...base, status: "lost", lossReason: "self" };
   }
 
   let snake = [next, ...game.snake];
@@ -242,6 +247,43 @@ export function applyMove(game: Game, move: Dir): Game {
     };
   }
   return { ...base, snake, food, challenges };
+}
+
+/** User-facing copy for terminal states (classic self-crash and related). */
+export function endgameAnnouncement(game: Game): {
+  title: string;
+  detail: string;
+} | null {
+  if (game.status === "won") {
+    return {
+      title: "Board cleared",
+      detail: "The snake filled every cell — classic win.",
+    };
+  }
+  if (game.status !== "lost") return null;
+
+  const reason = game.lossReason ?? "self";
+  switch (reason) {
+    case "self":
+      return {
+        title: "Game over",
+        detail: "The snake crashed into itself while maneuvering.",
+      };
+    case "wall":
+      return {
+        title: "Game over",
+        detail: "The snake hit the wall.",
+      };
+    case "trapped":
+      return {
+        title: "Game over",
+        detail: "No safe moves left — the snake trapped itself.",
+      };
+    default: {
+      const _exhaustive: never = reason;
+      return _exhaustive;
+    }
+  }
 }
 
 /** Lean state for Jev — includes food vector so it can hunt. */

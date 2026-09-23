@@ -14,6 +14,7 @@ import {
   createGame,
   DEFAULT_H,
   DEFAULT_W,
+  endgameAnnouncement,
   legalMoves,
   serializeState,
   straightShotSteps,
@@ -264,7 +265,7 @@ export default function SnakeApp() {
 
     const legal = legalMoves(g);
     if (!legal.length) {
-      const lost = { ...g, status: "lost" as const };
+      const lost = { ...g, status: "lost" as const, lossReason: "trapped" as const };
       gameRef.current = lost;
       setGame(lost);
       stopAutoplay();
@@ -478,7 +479,9 @@ export default function SnakeApp() {
     game.status === "won"
       ? "won"
       : game.status === "lost"
-        ? "collision"
+        ? game.lossReason === "self"
+          ? "self-crash"
+          : "collision"
         : running
           ? "running"
           : "idle";
@@ -486,17 +489,20 @@ export default function SnakeApp() {
   const statusLabel =
     statusKind === "won"
       ? "Won"
-      : statusKind === "collision"
-        ? "Collision"
-        : statusKind === "running"
-          ? "Running"
-          : "Idle";
+      : statusKind === "self-crash"
+        ? "Self crash"
+        : statusKind === "collision"
+          ? "Collision"
+          : statusKind === "running"
+            ? "Running"
+            : "Idle";
 
   const callView = useMemo(() => buildCallView(jev), [jev]);
   const jsonHtml = useMemo(
     () => (callView.payload ? highlightJson(callView.payload) : ""),
     [callView.payload],
   );
+  const announcement = useMemo(() => endgameAnnouncement(game), [game]);
 
   const headMeta = callView.head ? `[${callView.head[0]}, ${callView.head[1]}]` : "—";
   const foodMeta = callView.food ? `[${callView.food[0]}, ${callView.food[1]}]` : "—";
@@ -584,7 +590,52 @@ export default function SnakeApp() {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="main">
-        <BoardPanel game={game} />
+        <div className="board-stage">
+          <BoardPanel game={game} />
+          {announcement && (
+            <div
+              className={
+                "endgame-overlay" +
+                (game.status === "won"
+                  ? " endgame-won"
+                  : game.lossReason === "self"
+                    ? " endgame-self"
+                    : " endgame-lost")
+              }
+              role="status"
+              aria-live="polite"
+            >
+              <div className="endgame-card">
+                <p className="endgame-kicker">
+                  {game.status === "won"
+                    ? "Victory"
+                    : game.lossReason === "self"
+                      ? "Classic rule"
+                      : "Ended"}
+                </p>
+                <h2 className="endgame-title">{announcement.title}</h2>
+                <p className="endgame-detail">{announcement.detail}</p>
+                <dl className="endgame-stats">
+                  <div>
+                    <dt>Score</dt>
+                    <dd>{game.challenges.score}</dd>
+                  </div>
+                  <div>
+                    <dt>Length</dt>
+                    <dd>{game.snake.length}</dd>
+                  </div>
+                  <div>
+                    <dt>Steps</dt>
+                    <dd>{game.ticks}</dd>
+                  </div>
+                </dl>
+                <button type="button" className="btn btn-primary endgame-cta" onClick={reset}>
+                  Play again
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <ProbsPanel
           probs={probs}

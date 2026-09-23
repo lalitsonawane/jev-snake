@@ -73,6 +73,7 @@ body {
 .status-pill.running .status-dot { background: #22c55e; }
 .status-pill.idle .status-dot { background: #9ca3af; }
 .status-pill.collision .status-dot { background: #ef4444; }
+.status-pill.self-crash .status-dot { background: #dc2626; }
 .status-pill.won .status-dot { background: #2563eb; }
 
 .header-metrics {
@@ -210,6 +211,124 @@ body {
   color: #991b1b;
   font-size: 0.82rem;
   font-weight: 500;
+}
+
+.board-stage {
+  position: relative;
+  width: 100%;
+  max-width: 540px;
+  min-width: 0;
+}
+
+.endgame-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+  animation: endgame-fade 280ms ease-out both;
+}
+
+.endgame-card {
+  width: min(100%, 320px);
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  padding: 18px 18px 16px;
+  text-align: center;
+  animation: endgame-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.endgame-kicker {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.endgame-self .endgame-kicker { color: #dc2626; }
+.endgame-won .endgame-kicker { color: #2563eb; }
+
+.endgame-title {
+  margin: 0 0 8px;
+  font-size: 1.35rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: #111827;
+}
+
+.endgame-detail {
+  margin: 0 0 14px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #4b5563;
+}
+
+.endgame-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 8px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.endgame-stats div {
+  margin: 0;
+}
+
+.endgame-stats dt {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.endgame-stats dd {
+  margin: 2px 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #111827;
+}
+
+.endgame-cta {
+  width: 100%;
+  min-height: 44px;
+}
+
+@keyframes endgame-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes endgame-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .endgame-overlay,
+  .endgame-card {
+    animation: none;
+  }
 }
 
 /* ---------- Body: board | probs ---------- */
@@ -564,6 +683,10 @@ body {
   .board-panel {
     max-width: none;
     padding: 12px;
+  }
+
+  .board-stage {
+    max-width: none;
   }
 
   .board {
