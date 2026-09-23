@@ -16,4 +16,8 @@ npm run dev
 ```
 
 ## Vercel
-Set project env `TYPESAFE_API_KEY` for Production + Preview, then deploy.
+
+Project is linked to this GitHub repo (`lalitsonawane/jev-snake` → [apptonics-projects/jev-snake](https://vercel.com/apptonics-projects/jev-snake)). Pushes to `main` create production deployments; other branches get previews.
+
+- Production: https://jev-snake-theta.vercel.app
+- Set project env `TYPESAFE_API_KEY` for Production + Preview (and Development if you use `vercel env pull`).
