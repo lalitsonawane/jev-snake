@@ -37,9 +37,7 @@ type JevTick = {
   request: unknown;
   response: JevResponse;
   latencyMs: number;
-  phase: string;
   legal: Dir[];
-  batch: boolean;
   held: boolean;
 };
 
@@ -52,6 +50,7 @@ type StraightHold = {
 const DEFAULT_TICK_MS = 90;
 /** Stop hidden/idle autoplay before it can spend unattended Jev tokens. */
 const AUTOPLAY_IDLE_MS = 90_000;
+const DIR_SET: ReadonlySet<string> = new Set(ALL_DIRS);
 
 const OPP: Record<Dir, Dir> = {
   up: "down",
@@ -78,6 +77,16 @@ function tagForMove(dir: Dir, currentDir: Dir, legalSet: Set<Dir>): MoveTag {
 function fmtPct(n: unknown, digits = 1) {
   if (typeof n !== "number" || Number.isNaN(n)) return "—";
   return `${(n * 100).toFixed(digits)}%`;
+}
+
+function isDir(value: unknown): value is Dir {
+  return typeof value === "string" && DIR_SET.has(value);
+}
+
+function choiceLabel(chosen: string, chosenPct: string | null, held: boolean) {
+  if (held) return `held: ${chosen || "—"} · cached Jev`;
+  if (!chosen) return "choice: —";
+  return chosenPct ? `choice: ${chosen} (${chosenPct})` : `choice: ${chosen}`;
 }
 
 function asPair(v: unknown): [number, number] | null {
@@ -279,15 +288,15 @@ export default function SnakeApp() {
       gameRef.current = next;
       setGame(next);
       setJev((prev) =>
-        prev
-          ? {
-              ...prev,
-              latencyMs: 0,
-              phase: "held",
-              legal,
-              held: true,
-            }
-          : prev,
+        prev &&
+        prev.held &&
+        prev.latencyMs === 0 &&
+        prev.legal.length === legal.length &&
+        prev.legal.every((dir, index) => dir === legal[index])
+          ? prev
+          : prev
+            ? { ...prev, latencyMs: 0, legal, held: true }
+            : prev,
       );
 
       if (
@@ -316,9 +325,7 @@ export default function SnakeApp() {
       request: prev?.request ?? state,
       response: prev?.response ?? {},
       latencyMs: prev?.latencyMs ?? 0,
-      phase: useBatch ? "batch foresight…" : "Choice(move)…",
       legal,
-      batch: useBatch,
       held: false,
     }));
     setError(null);
@@ -344,18 +351,16 @@ export default function SnakeApp() {
           request: data.request ?? state,
           response: data.body ?? data.response ?? {},
           latencyMs: data.latencyMs ?? 0,
-          phase: "error",
           legal,
-          batch: useBatch,
           held: false,
         });
         stopAutoplay();
         return false;
       }
 
-      const move = data.response?.choice as Dir | undefined;
+      const move = data.response?.choice;
       // Every new decision must come from Jev — held ticks only reuse this choice.
-      if (!move || !legal.includes(move)) {
+      if (!isDir(move) || !legal.includes(move)) {
         setError(
           !move
             ? "Jev returned no Choice — autoplay stopped (no local fallback)."
@@ -365,9 +370,7 @@ export default function SnakeApp() {
           request: data.request,
           response: data.response,
           latencyMs: data.latencyMs,
-          phase: "error",
           legal,
-          batch: useBatch,
           held: false,
         });
         stopAutoplay();
@@ -393,9 +396,7 @@ export default function SnakeApp() {
         request: data.request,
         response: data.response,
         latencyMs: data.latencyMs,
-        phase: "completed",
         legal,
-        batch: useBatch,
         held: false,
       });
 
@@ -674,13 +675,7 @@ const ProbsPanel = memo(function ProbsPanel({
   currentDir: Dir;
   held: boolean;
 }) {
-  const choiceText = held
-    ? `held: ${chosen || "—"} · cached Jev`
-    : chosen && chosenPct
-      ? `choice: ${chosen} (${chosenPct})`
-      : chosen
-        ? `choice: ${chosen}`
-        : "choice: —";
+  const choiceText = choiceLabel(chosen, chosenPct, held);
 
   return (
     <section className="panel probs-panel">
