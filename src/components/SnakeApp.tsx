@@ -155,7 +155,7 @@ export default function SnakeApp() {
   const lastActiveRef = useRef(Date.now());
   const gearRef = useRef<HTMLDivElement | null>(null);
   /** Autoplay stops after this many ms with no user activity / hidden tab. */
-  const IDLE_MS = 90_000;
+  const IDLE_MS = 60_000;
 
   useEffect(() => {
     gameRef.current = game;
@@ -189,7 +189,7 @@ export default function SnakeApp() {
       if (Date.now() - lastActiveRef.current < IDLE_MS) return;
       runningRef.current = false;
       setRunning(false);
-      setError("Autoplay stopped after 90s idle — no Jev calls while you're away. Hit Start to resume.");
+      setError("Autoplay stopped after 1 min idle — no Jev calls while you're away. Hit Start to resume.");
     }, 5000);
     return () => {
       document.removeEventListener("visibilitychange", onVis);
