@@ -49,7 +49,7 @@ type StraightHold = {
 /** Default visual cadence. Network time counts toward this target interval. */
 const DEFAULT_TICK_MS = 90;
 /** Stop hidden/idle autoplay before it can spend unattended Jev tokens. */
-const AUTOPLAY_IDLE_MS = 90_000;
+const AUTOPLAY_IDLE_MS = 60_000;
 const DIR_SET: ReadonlySet<string> = new Set(ALL_DIRS);
 
 const OPP: Record<Dir, Dir> = {
@@ -220,7 +220,7 @@ export default function SnakeApp() {
       if (document.hidden) return;
       if (Date.now() - lastActiveRef.current < AUTOPLAY_IDLE_MS) return;
       stopAutoplay(
-        "Autoplay stopped after 90s idle — no Jev calls while you're away. Hit Start to resume.",
+        "Autoplay stopped after 1 min idle — no Jev calls while you're away. Hit Start to resume.",
       );
     }, 5000);
     return () => {
