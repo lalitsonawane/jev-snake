@@ -2,33 +2,41 @@
 
 ## Outcome
 
-Connected `github.com/lalitsonawane/jev-snake` to a new Vercel project so pushes to `main` deploy automatically. The previous upload/cloud-copy project was renamed and left as a backup (env vars retained there).
+Connected `github.com/lalitsonawane/jev-snake` to Vercel project **jev-snake** so pushes auto-deploy. Renamed the previous upload/cloud-copy project to `jev-snake-cloud-copy`, then migrated `TYPESAFE_API_KEY` onto the GitHub-linked project.
 
 Repo mirror: `docs/notes/2026-09-23-vercel-github-link.md`  
 Notion: https://app.notion.com/p/3e489f54d2c28126b5c6cbba3fb96f2c
 
+## Deploy flow
+
+```mermaid
+flowchart LR
+  subgraph Before
+    CC[Cloud-copy / CLI upload<br/>jev-snake]
+  end
+  subgraph After
+    GH[GitHub main] --> V[Vercel jev-snake]
+    V --> P[jev-snake-theta.vercel.app]
+  end
+  CC -->|rename| Backup[jev-snake-cloud-copy]
+  Backup -->|migrate env| V
+```
+
 ## Key decisions
 
-- Renamed the unlinked cloud-copy project to `jev-snake-cloud-copy` so the canonical name `jev-snake` could be reclaimed for a GitHub-linked project (`create_git_project` cannot reconnect an existing unlinked project with the same name).
-- Linked provider: **GitHub** (`lalitsonawane/jev-snake`), production branch `main`.
-- Did not decrypt or copy `TYPESAFE_API_KEY` via API; migrate that secret in the Vercel dashboard from `jev-snake-cloud-copy` → `jev-snake` (Production + Preview + Development).
+- Renamed unlinked cloud-copy to free the `jev-snake` name (`create_git_project` cannot reconnect an unlinked same-name project).
+- Provider: **GitHub**, production branch `main`.
+- Migrated `TYPESAFE_API_KEY` (Production + Preview + Development); smoke-tested `POST /api/jev-move` → HTTP 200.
+- Disabled Vercel Authentication so public `*.vercel.app` works without login.
+- Mobile layout: removed 1040px min-width so Start/Reset stay visible.
 
 ## Artifacts / links
 
-- Vercel project: https://vercel.com/apptonics-projects/jev-snake
+- Vercel: https://vercel.com/apptonics-projects/jev-snake
 - Production: https://jev-snake-theta.vercel.app
-- Team alias: https://jev-snake-apptonics-projects.vercel.app
-- Git branch alias: https://jev-snake-git-main-apptonics-projects.vercel.app
-- Backup (cloud copy): https://vercel.com/apptonics-projects/jev-snake-cloud-copy
-- First GitHub-backed deployment: `dpl_EAZCzZgJ5uLpm1bGMzgv2V1J9rq8` (READY, commit `2960bf3` on `main`)
+- Backup: https://vercel.com/apptonics-projects/jev-snake-cloud-copy
+- Architecture docs: [docs/architecture.md](../architecture.md)
 
-## Follow-up (same session)
+## Status
 
-- Made layout responsive: removed 1040px `min-width` locks that pushed Start/Reset off-screen on phones; stacked header controls full-width on mobile; scaled board cells with viewport.
-- Disabled Vercel Authentication (SSO) on the project so `*.vercel.app` is publicly usable without a Vercel login.
-
-## Open follow-ups
-
-- Copy `TYPESAFE_API_KEY` onto the new project (dashboard → Project Settings → Environment Variables), then redeploy or wait for the next push.
-- After confirming live Jev play on the new URL, delete or archive `jev-snake-cloud-copy` if no longer needed.
-- Optional: assign any preferred custom/`*.vercel.app` production domain that should stay stable across the cutover.
+Env migration and public access complete. Prefer GitHub → Vercel path going forward; archive cloud-copy when ready.
