@@ -12,11 +12,15 @@ export type ProviderConfig = {
   id: ProviderId;
   label: string;
   model: string;
-  /** Host root without trailing slash (SDK-style). Path `/v1/systemone` is appended. */
+  /**
+   * Host root without trailing slash (SDK-style). Path `/v1/systemone` is appended.
+   * Empty string means the env base URL is required (no working public default).
+   */
   defaultBaseUrl: string;
   apiKeyEnvs: readonly string[];
   baseUrlEnvs: readonly string[];
   missingKeyError: string;
+  missingBaseUrlError?: string;
 };
 
 export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
@@ -33,11 +37,14 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     id: "drex",
     label: "Drex",
     model: "drex-latest",
-    // Wire-compatible with TypeSafe; override via DREX_BASE_URL if your tenant uses another host.
-    defaultBaseUrl: "https://api.drex.ai",
+    // api.drex.ai does not resolve (ENOTFOUND). Operators must set DREX_BASE_URL
+    // to their tenant's System One root (same shape as TypeSafe; no /v1/systemone suffix).
+    defaultBaseUrl: "",
     apiKeyEnvs: ["DREX_API_KEY"],
     baseUrlEnvs: ["DREX_BASE_URL"],
     missingKeyError: "DREX_API_KEY not configured on server",
+    missingBaseUrlError:
+      "DREX_BASE_URL not configured on server (set to your Drex System One root, e.g. https://<host> — do not include /v1/systemone)",
   },
 };
 
@@ -53,17 +60,89 @@ function firstEnv(names: readonly string[]): string {
   return "";
 }
 
+/** Normalize a System One base URL: trim, strip trailing slash and accidental /v1/systemone. */
+export function normalizeBaseUrl(raw: string): string {
+  let base = raw.trim().replace(/\/+$/, "");
+  base = base.replace(/\/v1\/systemone\/?$/i, "");
+  return base.replace(/\/+$/, "");
+}
+
+export function isAbsoluteHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === "http:" || u.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export function resolveProvider(id: ProviderId): {
   config: ProviderConfig;
   apiKey: string;
   endpoint: string;
+  baseUrlError?: string;
 } {
   const config = PROVIDERS[id];
   const apiKey = firstEnv(config.apiKeyEnvs);
-  const base =
-    firstEnv(config.baseUrlEnvs).replace(/\/+$/, "") || config.defaultBaseUrl;
-  const endpoint = `${base}/v1/systemone`;
-  return { config, apiKey, endpoint };
+  const fromEnv = firstEnv(config.baseUrlEnvs);
+  const base = normalizeBaseUrl(fromEnv || config.defaultBaseUrl);
+
+  if (!base) {
+    return {
+      config,
+      apiKey,
+      endpoint: "",
+      baseUrlError: config.missingBaseUrlError || `${config.label} base URL not configured`,
+    };
+  }
+
+  if (!isAbsoluteHttpUrl(base)) {
+    return {
+      config,
+      apiKey,
+      endpoint: "",
+      baseUrlError: `${config.label} base URL must be an absolute http(s) URL (got "${base}"). Set ${config.baseUrlEnvs[0]}.`,
+    };
+  }
+
+  return { config, apiKey, endpoint: `${base}/v1/systemone` };
+}
+
+/** Human-readable upstream network failure (never leaks secrets). */
+export function describeUpstreamFetchError(
+  err: unknown,
+  endpoint: string,
+  label: string,
+): string {
+  const cause =
+    err && typeof err === "object" && "cause" in err
+      ? (err as { cause?: unknown }).cause
+      : undefined;
+  const causeObj =
+    cause && typeof cause === "object" ? (cause as Record<string, unknown>) : null;
+  const code = typeof causeObj?.code === "string" ? causeObj.code : "";
+  const hostname =
+    typeof causeObj?.hostname === "string" ? causeObj.hostname : "";
+
+  let hostHint = "";
+  try {
+    hostHint = new URL(endpoint).host;
+  } catch {
+    hostHint = endpoint;
+  }
+
+  if (code === "ENOTFOUND") {
+    return `${label} unreachable: DNS lookup failed for ${hostname || hostHint}. Set DREX_BASE_URL (or the provider base URL) to a resolvable System One host.`;
+  }
+  if (code === "ECONNREFUSED") {
+    return `${label} unreachable: connection refused at ${hostHint}.`;
+  }
+  if (code === "ETIMEDOUT" || code === "UND_ERR_CONNECT_TIMEOUT") {
+    return `${label} unreachable: connection timed out to ${hostHint}.`;
+  }
+
+  const msg = err instanceof Error ? err.message : String(err);
+  return `${label} upstream request failed (${msg}) for ${hostHint}.`;
 }
 
 /** Build the Choice (+ optional Score/foresight) questions used for Snake moves. */

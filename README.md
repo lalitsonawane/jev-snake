@@ -47,7 +47,7 @@ flowchart TB
 
   subgraph Upstream["System One hosts"]
     JEV["api.typesafe.ai<br/>model: jev-latest"]
-    DREX["DREX_BASE_URL<br/>model: drex-latest"]
+    DREX["DREX_BASE_URL (required)<br/>model: drex-latest"]
   end
 
   UI -->|"serializeState + legal_moves"| API
@@ -111,19 +111,19 @@ Keys are read **only** in the server Route Handler (`src/lib/systemone.ts` via `
 | Provider | API key env | Base URL env | Default base | Model |
 |----------|-------------|--------------|--------------|-------|
 | Jev | `TYPESAFE_API_KEY` (alias `TYPE_SAFE_API_KEY`) | `TYPESAFE_BASE_URL` (optional) | `https://api.typesafe.ai` | `jev-latest` |
-| Drex | `DREX_API_KEY` | `DREX_BASE_URL` (optional) | `https://api.drex.ai` | `drex-latest` |
+| Drex | `DREX_API_KEY` (**required**) | `DREX_BASE_URL` (**required**) | _(none — must set)_ | `drex-latest` |
 
 Pause/reset aborts the browser `fetch` to `/api/systemone-move`; the route forwards `req.signal` so upstream calls are cancelled too. `/api/jev-move` remains as a Jev-only alias.
 
-> **Base URL note:** Public Drex host docs were sparse at ship time. Default is `https://api.drex.ai` (TypeSafe-shaped). If your tenant uses another host, set `DREX_BASE_URL` to that root (no `/v1/systemone` suffix — the app appends it).
+> **Drex base URL:** There is no public default. `api.drex.ai` does not resolve (DNS `ENOTFOUND`). Set `DREX_BASE_URL` to your tenant’s System One root (`https://…` only — do **not** include `/v1/systemone`; the app appends it). Upstream DNS/connect failures return JSON `502` with a clear message (not an opaque HTML 500).
 
 ## Local
 
 ```bash
 export TYPESAFE_API_KEY=...          # for Jev
 export DREX_API_KEY=...              # for Drex / Compare
+export DREX_BASE_URL=https://...     # required for Drex (your System One host)
 # optional:
-# export DREX_BASE_URL=https://api.drex.ai
 # export TYPESAFE_BASE_URL=https://api.typesafe.ai
 
 npm install
@@ -141,7 +141,7 @@ GitHub-linked project: `lalitsonawane/jev-snake` → [apptonics-projects/jev-sna
 
 - Pushes to `main` → production
 - Other branches → preview
-- Env: `TYPESAFE_API_KEY` and `DREX_API_KEY` on Production + Preview (+ Development for `vercel env pull`); set `DREX_BASE_URL` if not using the default
+- Env: `TYPESAFE_API_KEY`, `DREX_API_KEY`, and **`DREX_BASE_URL`** on Production + Preview (+ Development for `vercel env pull`)
 
 ## Docs map
 

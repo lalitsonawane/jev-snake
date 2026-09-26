@@ -6,7 +6,8 @@ import { POST as systemonePost } from "./route";
 import { resolveProvider } from "@/lib/systemone";
 
 const JEV_ENDPOINT = resolveProvider("jev").endpoint;
-const DREX_ENDPOINT = resolveProvider("drex").endpoint;
+const DREX_BASE = "https://gateway.example.com/drex";
+const DREX_ENDPOINT = `${DREX_BASE}/v1/systemone`;
 
 function moveRequest(
   body: Record<string, unknown>,
@@ -71,9 +72,9 @@ describe("POST /api/systemone-move", () => {
     expect(body.model).toBe("jev-latest");
   });
 
-  it("calls Drex with drex-latest and DREX_API_KEY", async () => {
+  it("calls Drex with drex-latest, DREX_API_KEY, and DREX_BASE_URL", async () => {
     process.env.DREX_API_KEY = "drex-test-key";
-    delete process.env.DREX_BASE_URL;
+    process.env.DREX_BASE_URL = DREX_BASE;
 
     vi.stubGlobal(
       "fetch",
@@ -115,9 +116,9 @@ describe("POST /api/systemone-move", () => {
     expect(json.response.request_id).toBe("req_test");
   });
 
-  it("honors DREX_BASE_URL override", async () => {
+  it("strips accidental /v1/systemone from DREX_BASE_URL", async () => {
     process.env.DREX_API_KEY = "drex-test-key";
-    process.env.DREX_BASE_URL = "https://gateway.example.com/drex";
+    process.env.DREX_BASE_URL = `${DREX_BASE}/v1/systemone`;
 
     vi.stubGlobal(
       "fetch",
@@ -131,13 +132,14 @@ describe("POST /api/systemone-move", () => {
 
     await systemonePost(moveRequest({ provider: "drex" }));
     expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-      "https://gateway.example.com/drex/v1/systemone",
+      DREX_ENDPOINT,
       expect.any(Object),
     );
   });
 
   it("returns 503 when DREX_API_KEY is missing", async () => {
     delete process.env.DREX_API_KEY;
+    process.env.DREX_BASE_URL = DREX_BASE;
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 
@@ -146,6 +148,39 @@ describe("POST /api/systemone-move", () => {
     const json = await res.json();
     expect(json.error).toMatch(/DREX_API_KEY/);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 JSON when DREX_BASE_URL is missing", async () => {
+    process.env.DREX_API_KEY = "drex-test-key";
+    delete process.env.DREX_BASE_URL;
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const res = await systemonePost(moveRequest({ provider: "drex" }));
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json.error).toMatch(/DREX_BASE_URL/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 JSON (not HTML 500) when upstream DNS fails", async () => {
+    process.env.DREX_API_KEY = "drex-test-key";
+    process.env.DREX_BASE_URL = DREX_BASE;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw Object.assign(new TypeError("fetch failed"), {
+          cause: { code: "ENOTFOUND", hostname: "gateway.example.com" },
+        });
+      }),
+    );
+
+    const res = await systemonePost(moveRequest({ provider: "drex" }));
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.error).toMatch(/DNS lookup failed/);
+    expect(json.provider).toBe("drex");
   });
 
   it("cancels the upstream fetch when the client aborts mid-flight", async () => {

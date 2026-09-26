@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   buildMoveQuestions,
+  describeUpstreamFetchError,
   isProviderId,
   resolveProvider,
   shapeMoveResult,
@@ -17,9 +18,15 @@ export async function handleSystemOneMove(
     ? body.provider
     : defaultProvider;
 
-  const { config, apiKey, endpoint } = resolveProvider(providerId);
+  const { config, apiKey, endpoint, baseUrlError } = resolveProvider(providerId);
   if (!apiKey) {
     return NextResponse.json({ error: config.missingKeyError }, { status: 503 });
+  }
+  if (baseUrlError || !endpoint) {
+    return NextResponse.json(
+      { error: baseUrlError || `${config.label} base URL not configured` },
+      { status: 503 },
+    );
   }
 
   const state = body?.state;
@@ -60,7 +67,23 @@ export async function handleSystemOneMove(
     ) {
       return new NextResponse(null, { status: 499 });
     }
-    throw err;
+    // Upstream DNS/connect failures must be JSON — a bare throw becomes HTML 500
+    // and Safari surfaces that as "The string did not match the expected pattern"
+    // when the client calls res.json().
+    return NextResponse.json(
+      {
+        error: describeUpstreamFetchError(err, endpoint, config.label),
+        provider: providerId,
+        endpointHost: (() => {
+          try {
+            return new URL(endpoint).host;
+          } catch {
+            return null;
+          }
+        })(),
+      },
+      { status: 502 },
+    );
   }
   const latencyMs = Math.round(performance.now() - t0);
   const text = await res.text();
@@ -72,6 +95,9 @@ export async function handleSystemOneMove(
   }
 
   if (!res.ok) {
+    // Clamp odd upstream statuses so NextResponse always gets a valid code.
+    const status =
+      res.status >= 400 && res.status <= 599 ? res.status : 502;
     return NextResponse.json(
       {
         error: `${config.label} HTTP ${res.status}`,
@@ -80,7 +106,7 @@ export async function handleSystemOneMove(
         provider: providerId,
         latencyMs,
       },
-      { status: res.status },
+      { status },
     );
   }
 
