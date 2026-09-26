@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "jev / snake",
-  description: "Snake autoplay powered by TypeSafe Jev (systemone)",
+  description: "Snake autoplay powered by TypeSafe Jev or Drex (systemone)",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -8,9 +8,11 @@ Repo mirror for the system design. Companion Notion page: https://app.notion.com
 
 | Layer | Path | Role |
 |-------|------|------|
-| UI | `src/components/SnakeApp.tsx` | Autoplay loop, board, probs, JSON, endgame overlay |
+| UI | `src/components/SnakeApp.tsx` | Autoplay loop, Jev/Drex/Compare, board, probs, JSON, endgame |
 | Rules | `src/lib/snake.ts` | Moves, legal dirs, straight-line holds, win/lose, serializeState |
-| API | `src/app/api/jev-move/route.ts` | Server-only TypeSafe call + choice validation |
+| Providers | `src/lib/systemone.ts` | Jev + Drex env, payload build, response shape |
+| API | `src/app/api/systemone-move/route.ts` | Server-only System One call (`provider: jev \| drex`) |
+| Alias | `src/app/api/jev-move/route.ts` | Jev-only alias of systemone-move |
 | Host | Vercel project `jev-snake` | GitHub deploys from `main` |
 
 ## Request path
@@ -18,26 +20,40 @@ Repo mirror for the system design. Companion Notion page: https://app.notion.com
 ```mermaid
 sequenceDiagram
   participant U as SnakeApp
-  participant R as /api/jev-move
-  participant T as TypeSafe systemone
+  participant R as /api/systemone-move
+  participant J as TypeSafe jev-latest
+  participant D as Drex drex-latest
 
   U->>U: legalMoves(game)
   alt straight-line hold still valid
     U->>U: applyMove(heldDir) without network
-  else need new Jev Choice
-    U->>R: POST { state, legal_moves, batch }
-    R->>R: rebuild Choice criteria from state
-    R->>T: POST /v1/systemone (jev-latest)
-    T-->>R: choice + probabilities
-    R->>R: reject if choice ∉ legal_moves
+  else single model
+    U->>R: POST { provider, state, legal_moves, batch }
+    alt provider = jev
+      R->>J: POST /v1/systemone
+      J-->>R: choice + probabilities
+    else provider = drex
+      R->>D: POST /v1/systemone
+      D-->>R: choice + probabilities
+    end
     R-->>U: response
     U->>U: applyMove(choice)
-    U->>U: maybe arm straightShot hold
+  else compare
+    U->>R: parallel Jev + Drex (same state/questions)
+    R-->>U: both answers
+    U->>U: applyMove(driver choice)
   end
   alt status ≠ playing
     U->>U: stop · endgameAnnouncement
   end
 ```
+
+## Env (server-only)
+
+| Provider | Key | Base URL (optional) | Default base | Model |
+|----------|-----|---------------------|--------------|-------|
+| Jev | `TYPESAFE_API_KEY` | `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | `jev-latest` |
+| Drex | `DREX_API_KEY` | `DREX_BASE_URL` | `https://api.drex.ai` | `drex-latest` |
 
 ## Game rules
 
@@ -95,12 +111,15 @@ flowchart LR
   GH[GitHub push] --> VH[Vercel Git integration]
   VH -->|main| Prod[Production<br/>jev-snake-theta.vercel.app]
   VH -->|branch / PR| Prev[Preview URL]
-  Env[(TYPESAFE_API_KEY)] --> Prod
-  Env --> Prev
+  EnvJ[(TYPESAFE_API_KEY)] --> Prod
+  EnvD[(DREX_API_KEY)] --> Prod
+  EnvJ --> Prev
+  EnvD --> Prev
 ```
 
 ## Related notes
 
+- [2026-09-26 Jev / Drex compare](notes/2026-09-26-jev-drex-compare.md)
 - [2026-09-23 Vercel GitHub link](notes/2026-09-23-vercel-github-link.md)
 - [2026-09-23 Documentation refresh](notes/2026-09-23-docs-architecture.md)
 - [2026-09-23 Straight-line hold](notes/2026-09-23-straight-line-hold.md)
