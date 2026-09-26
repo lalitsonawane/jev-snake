@@ -236,7 +236,20 @@ async function fetchModelMove(
     }),
     signal,
   });
-  const data = (await res.json()) as Record<string, unknown>;
+  // Prefer text→JSON so non-JSON 500 HTML never surfaces Safari's
+  // "The string did not match the expected pattern" from res.json().
+  const text = await res.text();
+  let data: Record<string, unknown>;
+  try {
+    data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    data = {
+      error: res.ok
+        ? "Invalid JSON from /api/systemone-move"
+        : `HTTP ${res.status} (non-JSON response from server)`,
+      raw: text.slice(0, 400),
+    };
+  }
   return { ok: res.ok, status: res.status, data };
 }
 
