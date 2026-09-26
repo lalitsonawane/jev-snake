@@ -22,21 +22,29 @@ import {
   type Game,
   type Pt,
 } from "@/lib/snake";
+import type { ProviderId } from "@/lib/systemone";
 
-type JevResponse = {
+type ModelResponse = {
   model?: string;
   choice?: string;
   confidence?: number;
   probabilities?: Record<string, number>;
   scores?: Record<string, { score?: number; confidence?: number }>;
-  foresight?: { choice?: string; confidence?: number; probabilities?: Record<string, number> } | null;
+  foresight?: {
+    choice?: string;
+    confidence?: number;
+    probabilities?: Record<string, number>;
+  } | null;
   usage?: unknown;
+  evaluation_time_ms?: number;
+  request_id?: string;
   batch?: boolean;
 };
 
-type JevTick = {
+type ModelTick = {
+  provider: ProviderId;
   request: unknown;
-  response: JevResponse;
+  response: ModelResponse;
   latencyMs: number;
   legal: Dir[];
   held: boolean;
@@ -49,9 +57,11 @@ type StraightHold = {
 
 /** Default visual cadence. Network time counts toward this target interval. */
 const DEFAULT_TICK_MS = 90;
-/** Stop hidden/idle autoplay before it can spend unattended Jev tokens. */
+/** Stop hidden/idle autoplay before it can spend unattended tokens. */
 const AUTOPLAY_IDLE_MS = 60_000;
 const DIR_SET: ReadonlySet<string> = new Set(ALL_DIRS);
+
+type PlayMode = "jev" | "drex" | "compare";
 
 const OPP: Record<Dir, Dir> = {
   up: "down",
@@ -65,6 +75,11 @@ const DIR_ARROW: Record<Dir, string> = {
   down: "↓",
   left: "←",
   right: "→",
+};
+
+const PROVIDER_LABEL: Record<ProviderId, string> = {
+  jev: "Jev",
+  drex: "Drex",
 };
 
 type MoveTag = "safe" | "neck" | "body";
@@ -84,39 +99,48 @@ function isDir(value: unknown): value is Dir {
   return typeof value === "string" && DIR_SET.has(value);
 }
 
-function choiceLabel(chosen: string, chosenPct: string | null, held: boolean) {
-  if (held) return `held: ${chosen || "—"} · cached Jev`;
+function choiceLabel(
+  chosen: string,
+  chosenPct: string | null,
+  held: boolean,
+  providerLabel: string,
+) {
+  if (held) return `held: ${chosen || "—"} · cached ${providerLabel}`;
   if (!chosen) return "choice: —";
   return chosenPct ? `choice: ${chosen} (${chosenPct})` : `choice: ${chosen}`;
 }
 
 function asPair(v: unknown): [number, number] | null {
-  if (Array.isArray(v) && v.length >= 2 && typeof v[0] === "number" && typeof v[1] === "number") {
+  if (
+    Array.isArray(v) &&
+    v.length >= 2 &&
+    typeof v[0] === "number" &&
+    typeof v[1] === "number"
+  ) {
     return [v[0], v[1]];
   }
   return null;
 }
 
-/** Compact view of last Jev I/O for the JSON panel — derived only from real request/response. */
-function buildCallView(jev: JevTick | null): {
+/** Compact view of last System One I/O for the JSON panel. */
+function buildCallView(tick: ModelTick | null): {
   head: [number, number] | null;
   food: [number, number] | null;
   payload: Record<string, unknown> | null;
 } {
-  if (!jev) return { head: null, food: null, payload: null };
-  const req = (jev.request && typeof jev.request === "object" ? jev.request : {}) as Record<
-    string,
-    unknown
-  >;
-  const res = jev.response || {};
+  if (!tick) return { head: null, food: null, payload: null };
+  const req = (
+    tick.request && typeof tick.request === "object" ? tick.request : {}
+  ) as Record<string, unknown>;
+  const res = tick.response || {};
   const head = asPair(req.head);
   const food = asPair(req.food);
   const dx = typeof req.food_dx === "number" ? req.food_dx : null;
   const dy = typeof req.food_dy === "number" ? req.food_dy : null;
   const legal = Array.isArray(req.legal)
     ? (req.legal as string[])
-    : Array.isArray(jev.legal)
-      ? jev.legal
+    : Array.isArray(tick.legal)
+      ? tick.legal
       : [];
 
   const state: Record<string, unknown> = {
@@ -134,13 +158,17 @@ function buildCallView(jev: JevTick | null): {
   return {
     head,
     food,
-    payload: { state, move },
+    payload: {
+      provider: tick.provider,
+      model: res.model ?? null,
+      state,
+      move,
+    },
   };
 }
 
 function highlightJson(value: unknown): string {
   const raw = JSON.stringify(value, null, 2);
-  // Escape HTML then color tokens
   const esc = raw
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -162,12 +190,83 @@ function highlightJson(value: unknown): string {
   );
 }
 
+function softTick(
+  prev: ModelTick | null,
+  provider: ProviderId,
+  legal: Dir[],
+): ModelTick {
+  return {
+    provider,
+    request: prev?.request ?? {},
+    response: prev?.response ?? {},
+    latencyMs: prev?.latencyMs ?? 0,
+    legal,
+    held: false,
+  };
+}
+
+function markHeld(prev: ModelTick | null, legal: Dir[]): ModelTick | null {
+  if (!prev) return prev;
+  if (
+    prev.held &&
+    prev.latencyMs === 0 &&
+    prev.legal.length === legal.length &&
+    prev.legal.every((dir, index) => dir === legal[index])
+  ) {
+    return prev;
+  }
+  return { ...prev, latencyMs: 0, legal, held: true };
+}
+
+async function fetchModelMove(
+  provider: ProviderId,
+  state: Record<string, unknown>,
+  legal: Dir[],
+  batch: boolean,
+  signal: AbortSignal,
+): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
+  const res = await fetch("/api/systemone-move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      provider,
+      state,
+      legal_moves: legal,
+      batch,
+    }),
+    signal,
+  });
+  const data = (await res.json()) as Record<string, unknown>;
+  return { ok: res.ok, status: res.status, data };
+}
+
+function tickFromData(
+  provider: ProviderId,
+  legal: Dir[],
+  data: Record<string, unknown>,
+  fallbackState: unknown,
+): ModelTick {
+  return {
+    provider,
+    request: data.request ?? fallbackState,
+    response: (data.response as ModelResponse) ||
+      (data.body as ModelResponse) ||
+      {},
+    latencyMs: typeof data.latencyMs === "number" ? data.latencyMs : 0,
+    legal,
+    held: false,
+  };
+}
+
 export default function SnakeApp() {
   const [game, setGame] = useState<Game>(() => createGame(DEFAULT_W, DEFAULT_H));
   const [running, setRunning] = useState(false);
   const [batch, setBatch] = useState(false);
+  const [playMode, setPlayMode] = useState<PlayMode>("jev");
+  /** Which model's choice moves the snake when comparing. */
+  const [driveWith, setDriveWith] = useState<ProviderId>("jev");
   const [gearOpen, setGearOpen] = useState(false);
-  const [jev, setJev] = useState<JevTick | null>(null);
+  const [ticks, setTicks] = useState<Partial<Record<ProviderId, ModelTick>>>({});
   const [error, setError] = useState<string | null>(null);
   const [tickMs, setTickMs] = useState(DEFAULT_TICK_MS);
 
@@ -175,6 +274,8 @@ export default function SnakeApp() {
   const runningRef = useRef(false);
   const busyRef = useRef(false);
   const batchRef = useRef(false);
+  const playModeRef = useRef<PlayMode>(playMode);
+  const driveWithRef = useRef<ProviderId>(driveWith);
   const holdRef = useRef<StraightHold | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const runVersionRef = useRef(0);
@@ -187,6 +288,12 @@ export default function SnakeApp() {
   useEffect(() => {
     batchRef.current = batch;
   }, [batch]);
+  useEffect(() => {
+    playModeRef.current = playMode;
+  }, [playMode]);
+  useEffect(() => {
+    driveWithRef.current = driveWith;
+  }, [driveWith]);
 
   const bumpActivity = useCallback(() => {
     lastActiveRef.current = Date.now();
@@ -203,11 +310,12 @@ export default function SnakeApp() {
     if (message) setError(message);
   }, []);
 
-  // Stop autoplay when tab hidden or user idle — saves Jev tokens
   useEffect(() => {
     const onVis = () => {
       if (document.hidden && runningRef.current) {
-        stopAutoplay("Autoplay stopped — tab hidden (saves Jev tokens). Hit Start to resume.");
+        stopAutoplay(
+          "Autoplay stopped — tab hidden (saves API tokens). Hit Start to resume.",
+        );
       }
     };
     const onAct = () => bumpActivity();
@@ -221,7 +329,7 @@ export default function SnakeApp() {
       if (document.hidden) return;
       if (Date.now() - lastActiveRef.current < AUTOPLAY_IDLE_MS) return;
       stopAutoplay(
-        "Autoplay stopped after 1 min idle — no Jev calls while you're away. Hit Start to resume.",
+        "Autoplay stopped after 1 min idle — no API calls while you're away. Hit Start to resume.",
       );
     }, 5000);
     return () => {
@@ -234,7 +342,6 @@ export default function SnakeApp() {
     };
   }, [bumpActivity, stopAutoplay]);
 
-  // Close gear menu on outside click
   useEffect(() => {
     if (!gearOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -249,175 +356,194 @@ export default function SnakeApp() {
   const reset = useCallback(() => {
     stopAutoplay();
     setError(null);
-    setJev(null);
+    setTicks({});
     const g = createGame(DEFAULT_W, DEFAULT_H);
     gameRef.current = g;
     setGame(g);
   }, [stopAutoplay]);
 
-  const step = useCallback(async (runVersion: number): Promise<boolean> => {
-    if (busyRef.current) return false;
-    const g = gameRef.current;
-    if (g.status !== "playing") {
+  const changePlayMode = useCallback(
+    (mode: PlayMode) => {
+      if (mode === playMode) return;
       stopAutoplay();
-      return false;
-    }
+      setPlayMode(mode);
+      setTicks({});
+      setError(null);
+      if (mode !== "compare") setDriveWith(mode);
+    },
+    [playMode, stopAutoplay],
+  );
 
-    const legal = legalMoves(g);
-    if (!legal.length) {
-      const lost = { ...g, status: "lost" as const, lossReason: "trapped" as const };
-      gameRef.current = lost;
-      setGame(lost);
-      stopAutoplay();
-      return false;
-    }
-
-    const hold = holdRef.current;
-    const targetMatches =
-      hold &&
-      g.food &&
-      hold.target.x === g.food.x &&
-      hold.target.y === g.food.y;
-    if (
-      hold &&
-      targetMatches &&
-      legal.includes(hold.dir) &&
-      straightShotSteps(g, hold.dir) !== null
-    ) {
-      const next = applyMove(g, hold.dir);
-      const ateFood = next.challenges.foodsEaten !== g.challenges.foodsEaten;
-      gameRef.current = next;
-      setGame(next);
-      setJev((prev) =>
-        prev &&
-        prev.held &&
-        prev.latencyMs === 0 &&
-        prev.legal.length === legal.length &&
-        prev.legal.every((dir, index) => dir === legal[index])
-          ? prev
-          : prev
-            ? { ...prev, latencyMs: 0, legal, held: true }
-            : prev,
-      );
-
-      if (
-        ateFood ||
-        next.status !== "playing" ||
-        straightShotSteps(next, hold.dir) === null
-      ) {
-        holdRef.current = null;
-      }
-      if (next.status !== "playing") {
+  const step = useCallback(
+    async (runVersion: number): Promise<boolean> => {
+      if (busyRef.current) return false;
+      const g = gameRef.current;
+      if (g.status !== "playing") {
         stopAutoplay();
         return false;
       }
-      return true;
-    }
 
-    holdRef.current = null;
-    busyRef.current = true;
-    const useBatch = batchRef.current;
-    const state = serializeState(g, legal);
-    const controller = new AbortController();
-    requestRef.current = controller;
-
-    // Soft phase flip only — keep prior response/request so panels don't blank/flicker
-    setJev((prev) => ({
-      request: prev?.request ?? state,
-      response: prev?.response ?? {},
-      latencyMs: prev?.latencyMs ?? 0,
-      legal,
-      held: false,
-    }));
-    setError(null);
-
-    try {
-      const res = await fetch("/api/jev-move", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ state, legal_moves: legal, batch: useBatch }),
-        signal: controller.signal,
-      });
-      const data = await res.json();
-      if (
-        controller.signal.aborted ||
-        runVersion !== runVersionRef.current ||
-        !runningRef.current
-      ) {
+      const legal = legalMoves(g);
+      if (!legal.length) {
+        const lost = {
+          ...g,
+          status: "lost" as const,
+          lossReason: "trapped" as const,
+        };
+        gameRef.current = lost;
+        setGame(lost);
+        stopAutoplay();
         return false;
       }
-      if (!res.ok) {
-        setError(data.error || `HTTP ${res.status}`);
-        setJev({
-          request: data.request ?? state,
-          response: data.body ?? data.response ?? {},
-          latencyMs: data.latencyMs ?? 0,
-          legal,
-          held: false,
+
+      const hold = holdRef.current;
+      const targetMatches =
+        hold &&
+        g.food &&
+        hold.target.x === g.food.x &&
+        hold.target.y === g.food.y;
+      if (
+        hold &&
+        targetMatches &&
+        legal.includes(hold.dir) &&
+        straightShotSteps(g, hold.dir) !== null
+      ) {
+        const next = applyMove(g, hold.dir);
+        const ateFood =
+          next.challenges.foodsEaten !== g.challenges.foodsEaten;
+        gameRef.current = next;
+        setGame(next);
+        setTicks((prev) => {
+          const out: Partial<Record<ProviderId, ModelTick>> = {};
+          for (const id of ["jev", "drex"] as const) {
+            if (prev[id]) out[id] = markHeld(prev[id]!, legal)!;
+          }
+          return out;
         });
-        stopAutoplay();
-        return false;
+
+        if (
+          ateFood ||
+          next.status !== "playing" ||
+          straightShotSteps(next, hold.dir) === null
+        ) {
+          holdRef.current = null;
+        }
+        if (next.status !== "playing") {
+          stopAutoplay();
+          return false;
+        }
+        return true;
       }
 
-      const move = data.response?.choice;
-      // Every new decision must come from Jev — held ticks only reuse this choice.
-      if (!isDir(move) || !legal.includes(move)) {
-        setError(
-          !move
-            ? "Jev returned no Choice — autoplay stopped (no local fallback)."
-            : `Jev chose illegal move "${move}" — autoplay stopped (no local fallback).`,
+      holdRef.current = null;
+      busyRef.current = true;
+      const useBatch = batchRef.current;
+      const mode = playModeRef.current;
+      const driver: ProviderId =
+        mode === "compare" ? driveWithRef.current : mode;
+      const providers: ProviderId[] =
+        mode === "compare" ? ["jev", "drex"] : [mode];
+      const state = serializeState(g, legal);
+      const controller = new AbortController();
+      requestRef.current = controller;
+
+      setTicks((prev) => {
+        const next: Partial<Record<ProviderId, ModelTick>> = { ...prev };
+        for (const p of providers) {
+          next[p] = softTick(prev[p] ?? null, p, legal);
+        }
+        return next;
+      });
+      setError(null);
+
+      try {
+        const results = await Promise.all(
+          providers.map((p) =>
+            fetchModelMove(p, state, legal, useBatch, controller.signal).then(
+              (r) => [p, r] as const,
+            ),
+          ),
         );
-        setJev({
-          request: data.request,
-          response: data.response,
-          latencyMs: data.latencyMs,
-          legal,
-          held: false,
-        });
+
+        if (
+          controller.signal.aborted ||
+          runVersion !== runVersionRef.current ||
+          !runningRef.current
+        ) {
+          return false;
+        }
+
+        const byProvider = Object.fromEntries(results) as Record<
+          ProviderId,
+          { ok: boolean; status: number; data: Record<string, unknown> }
+        >;
+
+        const nextTicks: Partial<Record<ProviderId, ModelTick>> = {};
+        for (const p of providers) {
+          const r = byProvider[p];
+          nextTicks[p] = tickFromData(p, legal, r.data, state);
+        }
+        setTicks(nextTicks);
+
+        const driveResult = byProvider[driver];
+        if (!driveResult.ok) {
+          setError(
+            (driveResult.data.error as string) ||
+              `HTTP ${driveResult.status}`,
+          );
+          stopAutoplay();
+          return false;
+        }
+
+        const move = (driveResult.data.response as ModelResponse | undefined)
+          ?.choice;
+        if (!isDir(move) || !legal.includes(move)) {
+          const label = PROVIDER_LABEL[driver];
+          setError(
+            !move
+              ? `${label} returned no Choice — autoplay stopped (no local fallback).`
+              : `${label} chose illegal move "${move}" — autoplay stopped (no local fallback).`,
+          );
+          stopAutoplay();
+          return false;
+        }
+
+        const shotSteps = straightShotSteps(g, move);
+        const next = applyMove(g, move);
+        const ateFood =
+          next.challenges.foodsEaten !== g.challenges.foodsEaten;
+        if (
+          shotSteps !== null &&
+          shotSteps > 1 &&
+          !ateFood &&
+          next.status === "playing" &&
+          next.food &&
+          straightShotSteps(next, move) !== null
+        ) {
+          holdRef.current = { dir: move, target: { ...next.food } };
+        }
+        gameRef.current = next;
+        setGame(next);
+
+        if (next.status !== "playing") {
+          stopAutoplay();
+          return false;
+        }
+        return true;
+      } catch (e) {
+        if (controller.signal.aborted) return false;
+        setError(e instanceof Error ? e.message : String(e));
         stopAutoplay();
         return false;
+      } finally {
+        if (requestRef.current === controller) {
+          requestRef.current = null;
+          busyRef.current = false;
+        }
       }
-
-      const shotSteps = straightShotSteps(g, move);
-      const next = applyMove(g, move);
-      const ateFood = next.challenges.foodsEaten !== g.challenges.foodsEaten;
-      if (
-        shotSteps !== null &&
-        shotSteps > 1 &&
-        !ateFood &&
-        next.status === "playing" &&
-        next.food &&
-        straightShotSteps(next, move) !== null
-      ) {
-        holdRef.current = { dir: move, target: { ...next.food } };
-      }
-      gameRef.current = next;
-      setGame(next);
-      setJev({
-        request: data.request,
-        response: data.response,
-        latencyMs: data.latencyMs,
-        legal,
-        held: false,
-      });
-
-      if (next.status !== "playing") {
-        stopAutoplay();
-        return false;
-      }
-      return true;
-    } catch (e) {
-      if (controller.signal.aborted) return false;
-      setError(e instanceof Error ? e.message : String(e));
-      stopAutoplay();
-      return false;
-    } finally {
-      if (requestRef.current === controller) {
-        requestRef.current = null;
-        busyRef.current = false;
-      }
-    }
-  }, [stopAutoplay]);
+    },
+    [stopAutoplay],
+  );
 
   useEffect(() => {
     if (!running) return;
@@ -468,12 +594,11 @@ export default function SnakeApp() {
     }
   };
 
-  const legal = jev?.legal || legalMoves(game);
+  const driverId: ProviderId =
+    playMode === "compare" ? driveWith : playMode;
+  const driverTick = ticks[driverId] ?? null;
+  const legal = driverTick?.legal || legalMoves(game);
   const legalSet = useMemo(() => new Set(legal), [legal]);
-  const probs = jev?.response?.probabilities || {};
-  const chosen = (jev?.response?.choice as string) || "";
-  const chosenPct =
-    chosen && typeof probs[chosen] === "number" ? fmtPct(probs[chosen]) : null;
 
   const statusKind =
     game.status === "won"
@@ -497,15 +622,58 @@ export default function SnakeApp() {
             ? "Running"
             : "Idle";
 
-  const callView = useMemo(() => buildCallView(jev), [jev]);
-  const jsonHtml = useMemo(
-    () => (callView.payload ? highlightJson(callView.payload) : ""),
-    [callView.payload],
-  );
   const announcement = useMemo(() => endgameAnnouncement(game), [game]);
 
-  const headMeta = callView.head ? `[${callView.head[0]}, ${callView.head[1]}]` : "—";
-  const foodMeta = callView.food ? `[${callView.food[0]}, ${callView.food[1]}]` : "—";
+  const latencyLabel = useMemo(() => {
+    if (playMode === "compare") {
+      const j = ticks.jev;
+      const d = ticks.drex;
+      if (j?.held || d?.held) return "held · 0 ms";
+      const parts: string[] = [];
+      if (j?.latencyMs != null) parts.push(`J ${j.latencyMs}`);
+      if (d?.latencyMs != null) parts.push(`D ${d.latencyMs}`);
+      return parts.length ? `${parts.join(" / ")} ms` : "—";
+    }
+    const t = ticks[playMode];
+    if (t?.held) return "held · 0 ms";
+    return t?.latencyMs != null ? `${t.latencyMs} ms` : "—";
+  }, [playMode, ticks]);
+
+  const comparePayload = useMemo(() => {
+    if (playMode !== "compare") return null;
+    const j = ticks.jev ? buildCallView(ticks.jev).payload : null;
+    const d = ticks.drex ? buildCallView(ticks.drex).payload : null;
+    if (!j && !d) return null;
+    return { jev: j, drex: d };
+  }, [playMode, ticks]);
+
+  const singleCallView = useMemo(
+    () => buildCallView(playMode === "compare" ? driverTick : ticks[playMode] ?? null),
+    [playMode, ticks, driverTick],
+  );
+
+  const jsonHtml = useMemo(() => {
+    if (playMode === "compare") {
+      return comparePayload ? highlightJson(comparePayload) : "";
+    }
+    return singleCallView.payload ? highlightJson(singleCallView.payload) : "";
+  }, [playMode, comparePayload, singleCallView.payload]);
+
+  const headMeta = singleCallView.head
+    ? `[${singleCallView.head[0]}, ${singleCallView.head[1]}]`
+    : "—";
+  const foodMeta = singleCallView.food
+    ? `[${singleCallView.food[0]}, ${singleCallView.food[1]}]`
+    : "—";
+
+  const anyHeld =
+    playMode === "compare"
+      ? Boolean(ticks.jev?.held || ticks.drex?.held)
+      : Boolean(ticks[playMode]?.held);
+  const anyTick =
+    playMode === "compare"
+      ? Boolean(ticks.jev || ticks.drex)
+      : Boolean(ticks[playMode]);
 
   return (
     <div className="app">
@@ -529,9 +697,7 @@ export default function SnakeApp() {
           </span>
           <span className="metric latency">
             <span className="metric-label">Latency</span>
-            <span className="metric-value">
-              {jev?.held ? "held · 0 ms" : jev?.latencyMs != null ? `${jev.latencyMs} ms` : "—"}
-            </span>
+            <span className="metric-value">{latencyLabel}</span>
           </span>
         </div>
 
@@ -551,7 +717,7 @@ export default function SnakeApp() {
           <div className="btn-gear-wrap" ref={gearRef}>
             <button
               type="button"
-              className={"btn btn-gear" + (batch ? " on" : "")}
+              className={"btn btn-gear" + (batch || playMode !== "jev" ? " on" : "")}
               aria-label="Settings"
               aria-expanded={gearOpen}
               title="Settings"
@@ -561,6 +727,45 @@ export default function SnakeApp() {
             </button>
             {gearOpen && (
               <div className="gear-menu" role="menu">
+                <fieldset className="gear-fieldset">
+                  <legend>Model</legend>
+                  {(
+                    [
+                      ["jev", "Jev only"],
+                      ["drex", "Drex only"],
+                      ["compare", "Compare both"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <label key={value}>
+                      <input
+                        type="radio"
+                        name="play-mode"
+                        checked={playMode === value}
+                        onChange={() => changePlayMode(value)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </fieldset>
+                {playMode === "compare" && (
+                  <fieldset className="gear-fieldset">
+                    <legend>Drive moves with</legend>
+                    {(["jev", "drex"] as const).map((id) => (
+                      <label key={id}>
+                        <input
+                          type="radio"
+                          name="drive-with"
+                          checked={driveWith === id}
+                          onChange={() => {
+                            stopAutoplay();
+                            setDriveWith(id);
+                          }}
+                        />
+                        {PROVIDER_LABEL[id]} choice
+                      </label>
+                    ))}
+                  </fieldset>
+                )}
                 <label>
                   <input
                     type="checkbox"
@@ -576,8 +781,10 @@ export default function SnakeApp() {
                     value={tickMs}
                     min={0}
                     step={10}
-                    onChange={(e) => setTickMs(Math.max(0, Number(e.target.value) || 0))}
-                    title="Target milliseconds per move; Jev request time counts toward it"
+                    onChange={(e) =>
+                      setTickMs(Math.max(0, Number(e.target.value) || 0))
+                    }
+                    title="Target milliseconds per move; API request time counts toward it"
                   />
                   <span className="muted">ms</span>
                 </label>
@@ -587,9 +794,60 @@ export default function SnakeApp() {
         </div>
       </header>
 
+      <div
+        className="model-bar"
+        role="group"
+        aria-label="Model selection"
+      >
+        <button
+          type="button"
+          className={"model-chip" + (playMode === "jev" ? " active" : "")}
+          aria-pressed={playMode === "jev"}
+          onClick={() => changePlayMode("jev")}
+        >
+          Jev
+        </button>
+        <button
+          type="button"
+          className={"model-chip" + (playMode === "drex" ? " active" : "")}
+          aria-pressed={playMode === "drex"}
+          onClick={() => changePlayMode("drex")}
+        >
+          Drex
+        </button>
+        <button
+          type="button"
+          className={
+            "model-chip model-chip-compare" +
+            (playMode === "compare" ? " active" : "")
+          }
+          aria-pressed={playMode === "compare"}
+          onClick={() => changePlayMode("compare")}
+        >
+          Compare side by side
+        </button>
+        {playMode === "compare" && (
+          <span className="model-drive-hint">
+            Moves apply from{" "}
+            <strong>{PROVIDER_LABEL[driveWith]}</strong>
+            {" · "}
+            <button
+              type="button"
+              className="linkish"
+              onClick={() => {
+                stopAutoplay();
+                setDriveWith((d) => (d === "jev" ? "drex" : "jev"));
+              }}
+            >
+              switch driver
+            </button>
+          </span>
+        )}
+      </div>
+
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="main">
+      <div className={"main" + (playMode === "compare" ? " main-compare" : "")}>
         <div className="board-stage">
           <BoardPanel game={game} />
           {announcement && (
@@ -629,7 +887,11 @@ export default function SnakeApp() {
                     <dd>{game.ticks}</dd>
                   </div>
                 </dl>
-                <button type="button" className="btn btn-primary endgame-cta" onClick={reset}>
+                <button
+                  type="button"
+                  className="btn btn-primary endgame-cta"
+                  onClick={reset}
+                >
                   Play again
                 </button>
               </div>
@@ -637,22 +899,44 @@ export default function SnakeApp() {
           )}
         </div>
 
-        <ProbsPanel
-          probs={probs}
-          chosen={chosen}
-          chosenPct={chosenPct}
-          legalSet={legalSet}
-          currentDir={game.dir}
-          held={jev?.held ?? false}
-        />
+        {playMode === "compare" ? (
+          <div className="compare-probs">
+            <ProbsPanel
+              title="Jev probabilities"
+              provider="jev"
+              tick={ticks.jev ?? null}
+              legalSet={legalSet}
+              currentDir={game.dir}
+              driving={driveWith === "jev"}
+            />
+            <ProbsPanel
+              title="Drex probabilities"
+              provider="drex"
+              tick={ticks.drex ?? null}
+              legalSet={legalSet}
+              currentDir={game.dir}
+              driving={driveWith === "drex"}
+            />
+          </div>
+        ) : (
+          <ProbsPanel
+            title="Move Probabilities"
+            provider={playMode}
+            tick={ticks[playMode] ?? null}
+            legalSet={legalSet}
+            currentDir={game.dir}
+            driving
+          />
+        )}
       </div>
 
       <JsonPanel
         headMeta={headMeta}
         foodMeta={foodMeta}
         html={jsonHtml}
-        empty={!jev}
-        held={jev?.held ?? false}
+        empty={!anyTick}
+        held={anyHeld}
+        compare={playMode === "compare"}
       />
     </div>
   );
@@ -712,27 +996,52 @@ const BoardPanel = memo(function BoardPanel({ game }: { game: Game }) {
 });
 
 const ProbsPanel = memo(function ProbsPanel({
-  probs,
-  chosen,
-  chosenPct,
+  title,
+  provider,
+  tick,
   legalSet,
   currentDir,
-  held,
+  driving,
 }: {
-  probs: Record<string, number>;
-  chosen: string;
-  chosenPct: string | null;
+  title: string;
+  provider: ProviderId;
+  tick: ModelTick | null;
   legalSet: Set<Dir>;
   currentDir: Dir;
-  held: boolean;
+  driving: boolean;
 }) {
-  const choiceText = choiceLabel(chosen, chosenPct, held);
+  const probs = tick?.response?.probabilities || {};
+  const chosen = (tick?.response?.choice as string) || "";
+  const chosenPct =
+    chosen && typeof probs[chosen] === "number" ? fmtPct(probs[chosen]) : null;
+  const held = tick?.held ?? false;
+  const choiceText = choiceLabel(
+    chosen,
+    chosenPct,
+    held,
+    PROVIDER_LABEL[provider],
+  );
+  const conf =
+    typeof tick?.response?.confidence === "number"
+      ? fmtPct(tick.response.confidence)
+      : null;
 
   return (
-    <section className="panel probs-panel">
+    <section
+      className={
+        "panel probs-panel" + (driving ? " probs-driving" : " probs-reference")
+      }
+    >
       <div className="panel-head">
-        <h2 className="panel-title">Move Probabilities</h2>
-        <span className="panel-meta">{choiceText}</span>
+        <h2 className="panel-title">
+          {title}
+          {driving && <span className="drive-badge">driving</span>}
+        </h2>
+        <span className="panel-meta">
+          {choiceText}
+          {conf ? ` · conf ${conf}` : ""}
+          {tick?.latencyMs != null && !held ? ` · ${tick.latencyMs} ms` : ""}
+        </span>
       </div>
       <div className="prob-list">
         {ALL_DIRS.map((m) => {
@@ -769,17 +1078,21 @@ const JsonPanel = memo(function JsonPanel({
   html,
   empty,
   held,
+  compare,
 }: {
   headMeta: string;
   foodMeta: string;
   html: string;
   empty: boolean;
   held: boolean;
+  compare: boolean;
 }) {
   return (
     <section className="panel json-panel">
       <div className="panel-head">
-        <h2 className="panel-title">Last /v1/systemone Call</h2>
+        <h2 className="panel-title">
+          {compare ? "Last compare · /v1/systemone" : "Last /v1/systemone Call"}
+        </h2>
         <span className="panel-meta">
           {held && <span className="held-indicator">held · no API this tick</span>}
           head {headMeta} · food {foodMeta}
@@ -793,4 +1106,3 @@ const JsonPanel = memo(function JsonPanel({
     </section>
   );
 });
-
