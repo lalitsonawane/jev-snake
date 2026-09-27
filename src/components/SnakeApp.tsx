@@ -23,6 +23,17 @@ import {
   type Pt,
 } from "@/lib/snake";
 import type { ProviderId } from "@/lib/systemone";
+import {
+  agreementRate,
+  avgMs,
+  avgRatio,
+  emptySessionStats,
+  recordApiTick,
+  recordCompareAgreement,
+  recordHeldMove,
+  type ProviderSessionStats,
+  type SessionStats,
+} from "@/lib/provider-stats";
 
 type ModelResponse = {
   model?: string;
@@ -265,8 +276,24 @@ export default function SnakeApp() {
   const [playMode, setPlayMode] = useState<PlayMode>("jev");
   /** Which model's choice moves the snake when comparing. */
   const [driveWith, setDriveWith] = useState<ProviderId>("jev");
+
+  // Optional deep-link: ?mode=jev|drex|compare
+  useEffect(() => {
+    try {
+      const m = new URLSearchParams(window.location.search).get("mode");
+      if (m === "jev" || m === "drex" || m === "compare") {
+        setPlayMode(m);
+        if (m !== "compare") setDriveWith(m);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
   const [gearOpen, setGearOpen] = useState(false);
   const [ticks, setTicks] = useState<Partial<Record<ProviderId, ModelTick>>>({});
+  const [sessionStats, setSessionStats] = useState<SessionStats>(() =>
+    emptySessionStats(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [tickMs, setTickMs] = useState(DEFAULT_TICK_MS);
 
@@ -357,6 +384,7 @@ export default function SnakeApp() {
     stopAutoplay();
     setError(null);
     setTicks({});
+    setSessionStats(emptySessionStats());
     const g = createGame(DEFAULT_W, DEFAULT_H);
     gameRef.current = g;
     setGame(g);
@@ -368,6 +396,7 @@ export default function SnakeApp() {
       stopAutoplay();
       setPlayMode(mode);
       setTicks({});
+      setSessionStats(emptySessionStats());
       setError(null);
       if (mode !== "compare") setDriveWith(mode);
     },
@@ -419,6 +448,13 @@ export default function SnakeApp() {
             if (prev[id]) out[id] = markHeld(prev[id]!, legal)!;
           }
           return out;
+        });
+        // Held ticks skip every provider API call — credit the active driver.
+        setSessionStats((prev) => {
+          const mode = playModeRef.current;
+          const driver: ProviderId =
+            mode === "compare" ? driveWithRef.current : mode;
+          return { ...prev, [driver]: recordHeldMove(prev[driver]) };
         });
 
         if (
@@ -484,6 +520,43 @@ export default function SnakeApp() {
           nextTicks[p] = tickFromData(p, legal, r.data, state);
         }
         setTicks(nextTicks);
+
+        setSessionStats((prev) => {
+          let next = { ...prev };
+          for (const p of providers) {
+            const r = byProvider[p];
+            const res = (r.data.response as ModelResponse | undefined) || {};
+            const illegal =
+              r.ok &&
+              (!isDir(res.choice) || !legal.includes(res.choice as Dir));
+            next = {
+              ...next,
+              [p]: recordApiTick(next[p], {
+                ok: r.ok && !illegal,
+                latencyMs:
+                  typeof r.data.latencyMs === "number" ? r.data.latencyMs : 0,
+                choice: typeof res.choice === "string" ? res.choice : null,
+                confidence:
+                  typeof res.confidence === "number" ? res.confidence : null,
+                evaluationTimeMs:
+                  typeof res.evaluation_time_ms === "number"
+                    ? res.evaluation_time_ms
+                    : null,
+                usage: res.usage,
+              }),
+            };
+          }
+          if (mode === "compare") {
+            const jChoice = nextTicks.jev?.response?.choice;
+            const dChoice = nextTicks.drex?.response?.choice;
+            next = recordCompareAgreement(
+              next,
+              typeof jChoice === "string" ? jChoice : null,
+              typeof dChoice === "string" ? dChoice : null,
+            );
+          }
+          return next;
+        });
 
         const driveResult = byProvider[driver];
         if (!driveResult.ok) {
@@ -899,35 +972,44 @@ export default function SnakeApp() {
           )}
         </div>
 
-        {playMode === "compare" ? (
-          <div className="compare-probs">
+        <div className="side-rail">
+          {playMode === "compare" ? (
+            <div className="compare-probs">
+              <ProbsPanel
+                title="Jev probabilities"
+                provider="jev"
+                tick={ticks.jev ?? null}
+                legalSet={legalSet}
+                currentDir={game.dir}
+                driving={driveWith === "jev"}
+              />
+              <ProbsPanel
+                title="Drex probabilities"
+                provider="drex"
+                tick={ticks.drex ?? null}
+                legalSet={legalSet}
+                currentDir={game.dir}
+                driving={driveWith === "drex"}
+              />
+            </div>
+          ) : (
             <ProbsPanel
-              title="Jev probabilities"
-              provider="jev"
-              tick={ticks.jev ?? null}
+              title="Move Probabilities"
+              provider={playMode}
+              tick={ticks[playMode] ?? null}
               legalSet={legalSet}
               currentDir={game.dir}
-              driving={driveWith === "jev"}
+              driving
             />
-            <ProbsPanel
-              title="Drex probabilities"
-              provider="drex"
-              tick={ticks.drex ?? null}
-              legalSet={legalSet}
-              currentDir={game.dir}
-              driving={driveWith === "drex"}
-            />
-          </div>
-        ) : (
-          <ProbsPanel
-            title="Move Probabilities"
-            provider={playMode}
-            tick={ticks[playMode] ?? null}
-            legalSet={legalSet}
-            currentDir={game.dir}
-            driving
+          )}
+          <StatsBoard
+            playMode={playMode}
+            driveWith={driveWith}
+            game={game}
+            ticks={ticks}
+            sessionStats={sessionStats}
           />
-        )}
+        </div>
       </div>
 
       <JsonPanel
@@ -990,6 +1072,169 @@ const BoardPanel = memo(function BoardPanel({ game }: { game: Game }) {
             return <div key={`${x}-${y}`} className="cell cell-empty" />;
           }),
         )}
+      </div>
+    </section>
+  );
+});
+
+function fmtMs(n: number | null | undefined) {
+  if (n == null || Number.isNaN(n)) return "—";
+  return `${n} ms`;
+}
+
+function StatsMetricRows({
+  stats,
+  tick,
+}: {
+  stats: ProviderSessionStats;
+  tick: ModelTick | null;
+}) {
+  const avgLatency = avgMs(stats.latencySum, stats.latencyCount);
+  const avgEval = avgMs(stats.evalTimeSum, stats.evalTimeCount);
+  const avgConf = avgRatio(stats.confidenceSum, stats.confidenceCount);
+  const agree = agreementRate(stats);
+  const lastChoice = stats.lastChoice ?? tick?.response?.choice ?? null;
+  const lastConf =
+    stats.lastConfidence ??
+    (typeof tick?.response?.confidence === "number"
+      ? tick.response.confidence
+      : null);
+  const lastLat =
+    stats.lastLatencyMs ??
+    (tick && !tick.held ? tick.latencyMs : null);
+  const lastEval =
+    stats.lastEvalTimeMs ??
+    (typeof tick?.response?.evaluation_time_ms === "number"
+      ? tick.response.evaluation_time_ms
+      : null);
+
+  return (
+    <dl className="stats-metrics">
+      <div>
+        <dt>API calls</dt>
+        <dd>{stats.apiCalls}</dd>
+      </div>
+      <div>
+        <dt>Held</dt>
+        <dd>{stats.heldMoves}</dd>
+      </div>
+      <div>
+        <dt>Errors</dt>
+        <dd className={stats.errors > 0 ? "stats-warn" : undefined}>
+          {stats.errors}
+        </dd>
+      </div>
+      <div>
+        <dt>Last latency</dt>
+        <dd>{fmtMs(lastLat)}</dd>
+      </div>
+      <div>
+        <dt>Avg latency</dt>
+        <dd>{fmtMs(avgLatency)}</dd>
+      </div>
+      <div>
+        <dt>Eval time</dt>
+        <dd title="Last / avg evaluation_time_ms from upstream">
+          {fmtMs(lastEval)}
+          {avgEval != null ? (
+            <span className="stats-sub"> · avg {fmtMs(avgEval)}</span>
+          ) : null}
+        </dd>
+      </div>
+      <div>
+        <dt>Tokens in/out</dt>
+        <dd>
+          {stats.inputTokens || stats.outputTokens
+            ? `${stats.inputTokens} / ${stats.outputTokens}`
+            : "—"}
+        </dd>
+      </div>
+      <div>
+        <dt>Last choice</dt>
+        <dd className="stats-choice">{lastChoice || "—"}</dd>
+      </div>
+      <div>
+        <dt>Confidence</dt>
+        <dd>
+          {fmtPct(lastConf)}
+          {avgConf != null ? (
+            <span className="stats-sub"> · avg {fmtPct(avgConf)}</span>
+          ) : null}
+        </dd>
+      </div>
+      {stats.comparedChoices > 0 && (
+        <div>
+          <dt>Agree w/ peer</dt>
+          <dd>
+            {fmtPct(agree)}{" "}
+            <span className="stats-sub">
+              ({stats.agreements}/{stats.comparedChoices})
+            </span>
+          </dd>
+        </div>
+      )}
+    </dl>
+  );
+}
+
+const StatsBoard = memo(function StatsBoard({
+  playMode,
+  driveWith,
+  game,
+  ticks,
+  sessionStats,
+}: {
+  playMode: PlayMode;
+  driveWith: ProviderId;
+  game: Game;
+  ticks: Partial<Record<ProviderId, ModelTick>>;
+  sessionStats: SessionStats;
+}) {
+  const providers: ProviderId[] =
+    playMode === "compare" ? ["jev", "drex"] : [playMode];
+
+  return (
+    <section className="panel stats-board" aria-label="Model statistics">
+      <div className="panel-head">
+        <h2 className="panel-title">
+          {playMode === "compare" ? "Session stats · compare" : "Session stats"}
+        </h2>
+        <span className="panel-meta">
+          score {game.challenges.score} · len {game.snake.length} · steps{" "}
+          {game.ticks}
+          {game.challenges.foodsEaten
+            ? ` · foods ${game.challenges.foodsEaten}`
+            : ""}
+        </span>
+      </div>
+      <div
+        className={
+          "stats-columns" +
+          (playMode === "compare" ? " stats-columns-compare" : "")
+        }
+      >
+        {providers.map((id) => (
+          <div
+            key={id}
+            className={
+              "stats-col" +
+              (playMode === "compare" && driveWith === id
+                ? " stats-col-driving"
+                : "")
+            }
+          >
+            <div className="stats-col-head">
+              <span className="stats-provider">{PROVIDER_LABEL[id]}</span>
+              {playMode === "compare" && driveWith === id && (
+                <span className="drive-badge">driving</span>
+              )}
+              {ticks[id]?.response?.model ? (
+                <span className="stats-model">{String(ticks[id]!.response!.model)}</span>
+              ) : null}
+            </div>
+            <StatsMetricRows stats={sessionStats[id]} tick={ticks[id] ?? null} />
+          </div>
+        ))}
       </div>
     </section>
   );

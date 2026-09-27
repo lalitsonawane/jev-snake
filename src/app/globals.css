@@ -423,6 +423,14 @@ button.linkish {
   grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
 }
 
+.side-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
+}
+
 .compare-probs {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -433,6 +441,119 @@ button.linkish {
 
 .compare-probs .probs-panel {
   max-width: none;
+}
+
+/* ---------- Session stats (beside probs) ---------- */
+.stats-board {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 10px;
+}
+
+.stats-board .panel-head {
+  padding: 12px 14px 8px;
+}
+
+.stats-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0 10px 4px;
+}
+
+.stats-columns-compare {
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stats-col {
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+}
+
+.stats-columns:not(.stats-columns-compare) .stats-col {
+  background: transparent;
+  padding: 0 4px 4px;
+}
+
+.stats-col-driving {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.stats-col-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 8px;
+  min-height: 22px;
+}
+
+.stats-provider {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: -0.01em;
+}
+
+.stats-model {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.stats-metrics > div {
+  margin: 0;
+  min-width: 0;
+}
+
+.stats-metrics dt {
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.stats-metrics dd {
+  margin: 1px 0 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.stats-metrics dd.stats-warn {
+  color: #dc2626;
+}
+
+.stats-metrics dd.stats-choice {
+  text-transform: lowercase;
+}
+
+.stats-sub {
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: #6b7280;
 }
 
 .probs-driving {
@@ -800,6 +921,10 @@ button.linkish {
   }
 
   .compare-probs {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-columns-compare {
     grid-template-columns: 1fr;
   }
 
