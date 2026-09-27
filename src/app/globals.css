@@ -17,8 +17,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  width: min(1200px, 100%);
-  max-width: 1200px;
+  width: min(1240px, 100%);
+  max-width: 1240px;
   margin: 0 auto;
   padding: 14px 12px 28px;
 }
@@ -979,5 +979,513 @@ button.linkish {
 
   .prob-row {
     grid-template-columns: 56px minmax(0, 1fr) 44px 36px;
+  }
+}
+
+/* ---------- Flow sampler (application flow animation) ---------- */
+.flow-sampler {
+  --fs-ink: #1a2332;
+  --fs-muted: #5c6b7a;
+  --fs-teal: #2a9d8f;
+  --fs-teal-deep: #1d7a6f;
+  --fs-warm: #c45c26;
+  --fs-warm-soft: #e8a87c;
+  --fs-line: #c5d4de;
+  --fs-panel: rgba(255, 255, 255, 0.72);
+  --fs-grid: rgba(42, 157, 143, 0.09);
+  position: relative;
+  width: 100%;
+  padding: 16px 16px 12px;
+  border: 1px solid var(--fs-line);
+  border-radius: 4px;
+  background-color: #f3f7f8;
+  background-image:
+    linear-gradient(var(--fs-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--fs-grid) 1px, transparent 1px);
+  background-size: 22px 22px;
+  color: var(--fs-ink);
+  font-family: ui-monospace, "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
+  overflow: hidden;
+}
+
+.flow-sampler::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 80% 50% at 70% 30%,
+    rgba(42, 157, 143, 0.06),
+    transparent 60%
+  );
+}
+
+.fs-head {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.fs-eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: var(--fs-muted);
+  font-weight: 500;
+}
+
+.fs-title {
+  margin: 0;
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--fs-ink);
+}
+
+.fs-badge-wrap {
+  text-align: right;
+}
+
+.fs-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--fs-ink);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.fs-meta {
+  margin: 6px 0 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  color: var(--fs-muted);
+}
+
+.fs-meta-accent {
+  color: var(--fs-teal-deep);
+  font-weight: 650;
+}
+
+.fs-split {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fs-pane {
+  background: var(--fs-panel);
+  border: 1px solid var(--fs-line);
+  padding: 10px 12px 8px;
+  min-width: 0;
+}
+
+.fs-pane-parallel {
+  border-color: rgba(42, 157, 143, 0.45);
+  box-shadow: inset 0 0 0 1px rgba(42, 157, 143, 0.08);
+}
+
+.fs-pane-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  color: var(--fs-muted);
+  margin-bottom: 4px;
+}
+
+.fs-idx {
+  font-weight: 650;
+  color: var(--fs-ink);
+}
+
+.fs-pane-tag {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--fs-ink);
+}
+
+.fs-pane-parallel .fs-pane-tag {
+  color: var(--fs-teal-deep);
+}
+
+.fs-viz {
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fs-svg {
+  width: 100%;
+  height: 140px;
+  display: block;
+}
+
+.fs-serial-trail {
+  stroke: var(--fs-line);
+  stroke-width: 1.5;
+}
+
+.fs-serial-draw {
+  stroke: var(--fs-ink);
+  stroke-width: 1.75;
+  stroke-dasharray: 420;
+  stroke-dashoffset: 420;
+  animation: fs-serial-draw 16s linear infinite;
+}
+
+.fs-serial-dot {
+  fill: var(--fs-ink);
+  opacity: 0.35;
+}
+
+.fs-serial-dot.on {
+  fill: var(--fs-warm);
+  opacity: 1;
+}
+
+.fs-serial-focus {
+  fill: none;
+  stroke: var(--fs-warm);
+  stroke-width: 1.5;
+  opacity: 0.85;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: fs-pulse-ring 1.6s ease-out infinite;
+}
+
+.fs-serial-num {
+  fill: var(--fs-warm);
+  font-size: 9px;
+  font-weight: 700;
+  font-family: inherit;
+}
+
+.fs-burst-ray {
+  stroke: var(--fs-teal);
+  stroke-width: 1.15;
+  stroke-linecap: round;
+  opacity: 0.35;
+  transform-origin: 130px 70px;
+  animation: fs-ray-pulse 1.8s ease-in-out infinite;
+}
+
+.fs-burst-ring {
+  fill: none;
+  stroke: var(--fs-teal);
+  stroke-width: 1;
+  opacity: 0.25;
+  transform-origin: 130px 70px;
+  animation: fs-ring 2.4s ease-out infinite;
+}
+
+.fs-burst-ring.delay {
+  animation-delay: 0.8s;
+}
+
+.fs-burst-core {
+  fill: var(--fs-warm);
+  animation: fs-core 1.2s ease-in-out infinite;
+}
+
+.fs-burst-label {
+  fill: #fff;
+  font-size: 8px;
+  font-weight: 700;
+  font-family: inherit;
+}
+
+.fs-pane-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  color: var(--fs-muted);
+}
+
+.fs-clock-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.fs-clock {
+  width: 110px;
+  height: 22px;
+}
+
+.fs-clock-base {
+  stroke: var(--fs-ink);
+  stroke-width: 1.25;
+}
+
+.fs-clock-bead.serial {
+  fill: var(--fs-warm);
+  offset-path: path("M8,20 L112,8");
+  offset-distance: 0%;
+  animation: fs-bead 3.2s linear infinite;
+}
+
+.fs-clock-wave {
+  stroke: var(--fs-teal);
+  stroke-width: 1.4;
+  opacity: 0.35;
+}
+
+.fs-clock-wave.pulse {
+  opacity: 1;
+  stroke-dasharray: 180;
+  stroke-dashoffset: 180;
+  animation: fs-wave 1.6s linear infinite;
+}
+
+.fs-metrics {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.fs-tile {
+  background: var(--fs-panel);
+  border: 1px solid var(--fs-line);
+  padding: 10px 10px 8px;
+  min-height: 118px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fs-tile-k {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: var(--fs-muted);
+  font-weight: 650;
+}
+
+.fs-tile-v {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--fs-ink);
+  font-variant-numeric: tabular-nums;
+}
+
+.fs-tile-sub {
+  margin-top: auto;
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  color: var(--fs-muted);
+}
+
+.fs-spark-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  margin: 4px 0;
+}
+
+.fs-spark-bars span {
+  flex: 1;
+  min-height: 3px;
+  background: var(--fs-teal);
+  opacity: 0.75;
+  transform-origin: bottom center;
+  animation: fs-bar 2.2s ease-in-out infinite;
+}
+
+.fs-spark-bars span:nth-child(odd) {
+  background: var(--fs-warm);
+  animation-delay: 0.3s;
+}
+
+.fs-spark-line {
+  width: 100%;
+  height: 28px;
+  margin: 4px 0;
+}
+
+.fs-cost-path {
+  stroke: var(--fs-teal-deep);
+  stroke-width: 1.5;
+  stroke-dasharray: 160;
+  stroke-dashoffset: 160;
+  animation: fs-cost 4s linear infinite;
+}
+
+.fs-conf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  margin: 4px 0;
+}
+
+.fs-conf-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  font-size: 0.52rem;
+  font-weight: 650;
+  color: #0f3d38;
+  background: rgba(42, 157, 143, calc(0.2 + var(--fs-c, 0.5) * 0.75));
+  animation: fs-cell 2.8s ease-in-out infinite;
+}
+
+.fs-console {
+  position: relative;
+  border-top: 1px solid var(--fs-line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.fs-console-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 0.6rem;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  border-bottom: 1px solid rgba(197, 212, 222, 0.7);
+  padding-bottom: 4px;
+}
+
+.fs-console-k {
+  color: var(--fs-warm);
+  font-weight: 700;
+}
+
+.fs-console-v {
+  color: var(--fs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-sampler.fs-live .fs-pane-parallel {
+  border-color: var(--fs-teal);
+}
+
+.flow-sampler.fs-live .fs-burst-core {
+  animation-duration: 0.7s;
+}
+
+.flow-sampler.fs-reduced .fs-serial-draw,
+.flow-sampler.fs-reduced .fs-serial-focus,
+.flow-sampler.fs-reduced .fs-burst-ray,
+.flow-sampler.fs-reduced .fs-burst-ring,
+.flow-sampler.fs-reduced .fs-burst-core,
+.flow-sampler.fs-reduced .fs-clock-bead,
+.flow-sampler.fs-reduced .fs-clock-wave.pulse,
+.flow-sampler.fs-reduced .fs-cost-path,
+.flow-sampler.fs-reduced .fs-spark-bars span,
+.flow-sampler.fs-reduced .fs-conf-cell {
+  animation: none !important;
+}
+
+.flow-sampler.fs-reduced .fs-serial-draw {
+  stroke-dashoffset: 0;
+}
+
+.flow-sampler.fs-reduced .fs-clock-wave.pulse {
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+
+.flow-sampler.fs-reduced .fs-cost-path {
+  stroke-dashoffset: 0;
+}
+
+@keyframes fs-serial-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fs-pulse-ring {
+  0% { opacity: 0.9; transform: scale(0.85); }
+  100% { opacity: 0; transform: scale(1.55); }
+}
+
+@keyframes fs-ray-pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes fs-ring {
+  0% { transform: scale(0.55); opacity: 0.45; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
+@keyframes fs-core {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+@keyframes fs-bead {
+  to { offset-distance: 100%; }
+}
+
+@keyframes fs-wave {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fs-cost {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fs-bar {
+  0%, 100% { transform: scaleY(0.65); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes fs-cell {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.15); }
+}
+
+@media (max-width: 820px) {
+  .fs-split,
+  .fs-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .fs-split,
+  .fs-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .fs-head {
+    flex-direction: column;
+  }
+
+  .fs-badge-wrap {
+    text-align: left;
+  }
+
+  .fs-console-v {
+    white-space: normal;
+  }
+
+  .fs-title {
+    font-size: 1.35rem;
   }
 }
