@@ -20,5 +20,9 @@ Shipped model selector (**Jev** | **Drex** | **Compare side by side**) with serv
 
 ## Open follow-ups
 
-- Confirm production `DREX_BASE_URL` with the user’s Drex tenant if default host differs.
-- Set `DREX_API_KEY` on Vercel Production + Preview before Compare works in deploy.
+- ~~Confirm production `DREX_BASE_URL`~~ → **required**; `api.drex.ai` ENOTFOUND in prod (see follow-up fix PR).
+- Set `DREX_API_KEY` **and** `DREX_BASE_URL` on Vercel Production + Preview.
+
+## Follow-up (prod error)
+
+User saw Safari “The string did not match the expected pattern.” Root cause: uncaught `fetch failed` / `ENOTFOUND api.drex.ai` → HTML 500 → `res.json()` pattern error. Fix: require `DREX_BASE_URL`, return JSON 502 on upstream network errors, safe client JSON parse.

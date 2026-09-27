@@ -50,10 +50,10 @@ sequenceDiagram
 
 ## Env (server-only)
 
-| Provider | Key | Base URL (optional) | Default base | Model |
-|----------|-----|---------------------|--------------|-------|
-| Jev | `TYPESAFE_API_KEY` | `TYPESAFE_BASE_URL` | `https://api.typesafe.ai` | `jev-latest` |
-| Drex | `DREX_API_KEY` | `DREX_BASE_URL` | `https://api.drex.ai` | `drex-latest` |
+| Provider | Key | Base URL | Default base | Model |
+|----------|-----|----------|--------------|-------|
+| Jev | `TYPESAFE_API_KEY` | `TYPESAFE_BASE_URL` (optional) | `https://api.typesafe.ai` | `jev-latest` |
+| Drex | `DREX_API_KEY` | `DREX_BASE_URL` (**required**) | none (`api.drex.ai` does not resolve) | `drex-latest` |
 
 ## Game rules
 
