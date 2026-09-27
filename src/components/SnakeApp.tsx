@@ -34,6 +34,7 @@ import {
   type ProviderSessionStats,
   type SessionStats,
 } from "@/lib/provider-stats";
+import { FlowSampler } from "@/components/FlowSampler";
 
 type ModelResponse = {
   model?: string;
@@ -1024,6 +1025,16 @@ export default function SnakeApp() {
           />
         </div>
       </div>
+
+      <FlowSampler
+        playMode={playMode}
+        driveWith={driveWith}
+        running={running}
+        ticks={ticks}
+        sessionStats={sessionStats}
+        gameTicks={game.ticks}
+        score={game.challenges.score}
+      />
 
       <JsonPanel
         headMeta={headMeta}
