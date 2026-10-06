@@ -1,1377 +1,1562 @@
-"use client";
+* { box-sizing: border-box; }
 
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import {
-  ALL_DIRS,
-  applyMove,
-  createGame,
-  DEFAULT_H,
-  DEFAULT_W,
-  endgameAnnouncement,
-  legalMoves,
-  serializeState,
-  straightShotSteps,
-  type Dir,
-  type Game,
-  type Pt,
-} from "@/lib/snake";
-import type { ProviderId } from "@/lib/systemone";
-import {
-  agreementRate,
-  avgMs,
-  avgRatio,
-  emptySessionStats,
-  recordApiTick,
-  recordCompareAgreement,
-  recordHeldMove,
-  type ProviderSessionStats,
-  type SessionStats,
-} from "@/lib/provider-stats";
-import { FlowSampler } from "@/components/FlowSampler";
-
-type ModelResponse = {
-  model?: string;
-  choice?: string;
-  confidence?: number;
-  probabilities?: Record<string, number>;
-  scores?: Record<string, { score?: number; confidence?: number }>;
-  foresight?: {
-    choice?: string;
-    confidence?: number;
-    probabilities?: Record<string, number>;
-  } | null;
-  usage?: unknown;
-  evaluation_time_ms?: number;
-  request_id?: string;
-  batch?: boolean;
-};
-
-type ModelTick = {
-  provider: ProviderId;
-  request: unknown;
-  response: ModelResponse;
-  latencyMs: number;
-  legal: Dir[];
-  held: boolean;
-};
-
-type StraightHold = {
-  dir: Dir;
-  target: Pt;
-};
-
-/** Default visual cadence. Network time counts toward this target interval. */
-const DEFAULT_TICK_MS = 90;
-/** Stop hidden/idle autoplay before it can spend unattended tokens. */
-const AUTOPLAY_IDLE_MS = 60_000;
-const DIR_SET: ReadonlySet<string> = new Set(ALL_DIRS);
-
-type PlayMode = "jev" | "drex" | "compare";
-
-const OPP: Record<Dir, Dir> = {
-  up: "down",
-  down: "up",
-  left: "right",
-  right: "left",
-};
-
-const DIR_ARROW: Record<Dir, string> = {
-  up: "↑",
-  down: "↓",
-  left: "←",
-  right: "→",
-};
-
-const PROVIDER_LABEL: Record<ProviderId, string> = {
-  jev: "Jev",
-  drex: "Drex",
-};
-
-type MoveTag = "safe" | "neck" | "body";
-
-function tagForMove(dir: Dir, currentDir: Dir, legalSet: Set<Dir>): MoveTag {
-  if (legalSet.has(dir)) return "safe";
-  if (dir === OPP[currentDir]) return "neck";
-  return "body";
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  overflow-x: hidden;
 }
 
-function fmtPct(n: unknown, digits = 1) {
-  if (typeof n !== "number" || Number.isNaN(n)) return "—";
-  return `${(n * 100).toFixed(digits)}%`;
+body {
+  color: #111827;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: #f8fafc;
 }
 
-function isDir(value: unknown): value is Dir {
-  return typeof value === "string" && DIR_SET.has(value);
+.app {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: min(1240px, 100%);
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 14px 12px 28px;
 }
 
-function choiceLabel(
-  chosen: string,
-  chosenPct: string | null,
-  held: boolean,
-  providerLabel: string,
-) {
-  if (held) return `held: ${chosen || "—"} · cached ${providerLabel}`;
-  if (!chosen) return "choice: —";
-  return chosenPct ? `choice: ${chosen} (${chosenPct})` : `choice: ${chosen}`;
+/* ---------- Header ---------- */
+.app-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
 }
 
-function asPair(v: unknown): [number, number] | null {
-  if (
-    Array.isArray(v) &&
-    v.length >= 2 &&
-    typeof v[0] === "number" &&
-    typeof v[1] === "number"
-  ) {
-    return [v[0], v[1]];
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-self: start;
+  min-width: 0;
+}
+
+.header-left h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #111827;
+  white-space: nowrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: #374151;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-pill.running .status-dot { background: #22c55e; }
+.status-pill.idle .status-dot { background: #9ca3af; }
+.status-pill.collision .status-dot { background: #ef4444; }
+.status-pill.self-crash .status-dot { background: #dc2626; }
+.status-pill.won .status-dot { background: #2563eb; }
+
+.header-metrics {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  justify-self: center;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.metric.score { min-width: 72px; }
+.metric.step { min-width: 64px; }
+.metric.latency { min-width: 110px; }
+
+.metric-label {
+  font-size: 0.78rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.metric-value {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  transition: background 80ms ease, opacity 80ms ease;
+  touch-action: manipulation;
+}
+
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  background: #2563eb;
+  color: #fff;
+  min-width: 78px;
+}
+.btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+
+.btn-outline {
+  background: #fff;
+  color: #111827;
+  border: 1px solid #e5e7eb;
+  min-width: 72px;
+}
+.btn-outline:hover:not(:disabled) { background: #f9fafb; }
+
+.btn-shortcuts {
+  min-width: 40px;
+  width: 40px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+
+.btn-gear {
+  background: #fff;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 1rem;
+  position: relative;
+}
+.btn-gear:hover { background: #f9fafb; color: #111827; }
+.btn-gear.on {
+  border-color: #93c5fd;
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.btn-gear-wrap { position: relative; }
+
+.gear-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  padding: 10px 12px;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.gear-menu label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gear-menu input[type="checkbox"],
+.gear-menu input[type="radio"] { accent-color: #2563eb; }
+.gear-menu input[type="number"] {
+  width: 64px;
+  margin-left: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.gear-fieldset {
+  margin: 0;
+  padding: 0;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gear-fieldset legend {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 2px;
+}
+
+.model-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.model-chip {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #374151;
+  border-radius: 10px;
+  padding: 7px 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease, color 80ms ease;
+}
+
+.model-chip:hover {
+  background: #f9fafb;
+  color: #111827;
+}
+
+.model-chip.active {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.model-chip-compare.active {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.model-drive-hint {
+  font-size: 0.78rem;
+  color: #6b7280;
+  margin-left: 4px;
+}
+
+.model-drive-hint strong {
+  color: #111827;
+  font-weight: 650;
+}
+
+button.linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  color: #2563eb;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.error-banner {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.hold-banner {
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.shortcut-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.35);
+  z-index: 40;
+  padding: 16px;
+}
+
+.shortcut-card {
+  width: min(100%, 420px);
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.15);
+  padding: 16px;
+}
+
+.shortcut-head {
+  margin-bottom: 12px;
+}
+
+.shortcut-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 9px 10px;
+  font-size: 0.8rem;
+  color: #374151;
+}
+
+.shortcut-row kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  padding: 5px 7px;
+  border-radius: 7px;
+  border: 1px solid #dbe3ee;
+  background: #fff;
+  box-shadow: inset 0 -2px 0 rgba(148, 163, 184, 0.2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.mini-btn {
+  border: 1px solid #e5e7eb;
+  background: #fff;
+  color: #111827;
+  border-radius: 8px;
+  padding: 5px 9px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.board-stage {
+  position: relative;
+  width: 100%;
+  max-width: 540px;
+  min-width: 0;
+}
+
+.endgame-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+  animation: endgame-fade 280ms ease-out both;
+}
+
+.endgame-card {
+  width: min(100%, 320px);
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
+  padding: 18px 18px 16px;
+  text-align: center;
+  animation: endgame-rise 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.endgame-kicker {
+  margin: 0 0 6px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.endgame-self .endgame-kicker { color: #dc2626; }
+.endgame-won .endgame-kicker { color: #2563eb; }
+
+.endgame-title {
+  margin: 0 0 8px;
+  font-size: 1.35rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  color: #111827;
+}
+
+.endgame-detail {
+  margin: 0 0 14px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: #4b5563;
+}
+
+.endgame-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 8px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.endgame-stats div {
+  margin: 0;
+}
+
+.endgame-stats dt {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.endgame-stats dd {
+  margin: 2px 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #111827;
+}
+
+.endgame-cta {
+  width: 100%;
+  min-height: 44px;
+}
+
+@keyframes endgame-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes endgame-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
   }
-  return null;
-}
-
-/** Compact view of last System One I/O for the JSON panel. */
-function buildCallView(tick: ModelTick | null): {
-  head: [number, number] | null;
-  food: [number, number] | null;
-  payload: Record<string, unknown> | null;
-} {
-  if (!tick) return { head: null, food: null, payload: null };
-  const req = (
-    tick.request && typeof tick.request === "object" ? tick.request : {}
-  ) as Record<string, unknown>;
-  const res = tick.response || {};
-  const head = asPair(req.head);
-  const food = asPair(req.food);
-  const dx = typeof req.food_dx === "number" ? req.food_dx : null;
-  const dy = typeof req.food_dy === "number" ? req.food_dy : null;
-  const legal = Array.isArray(req.legal)
-    ? (req.legal as string[])
-    : Array.isArray(tick.legal)
-      ? tick.legal
-      : [];
-
-  const state: Record<string, unknown> = {
-    head: head ?? req.head ?? null,
-    food: food ?? req.food ?? null,
-    food_delta: dx != null && dy != null ? [dx, dy] : null,
-    safe_moves: legal,
-  };
-
-  const move: Record<string, unknown> = {
-    choice: res.choice ?? null,
-    confidence: typeof res.confidence === "number" ? res.confidence : null,
-  };
-
-  return {
-    head,
-    food,
-    payload: {
-      provider: tick.provider,
-      model: res.model ?? null,
-      state,
-      move,
-    },
-  };
-}
-
-function highlightJson(value: unknown): string {
-  const raw = JSON.stringify(value, null, 2);
-  const esc = raw
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return esc.replace(
-    /("(?:\\.|[^"\\])*")(\s*:)?|\b(true|false)\b|\b(null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|[{}\[\],]/g,
-    (match, str, colon, bool, nul) => {
-      if (str !== undefined) {
-        if (colon !== undefined) {
-          return `<span class="jk">${str}</span>${colon}`;
-        }
-        return `<span class="js">${str}</span>`;
-      }
-      if (bool !== undefined) return `<span class="jb">${bool}</span>`;
-      if (nul !== undefined) return `<span class="jnul">${nul}</span>`;
-      if (/^-?\d/.test(match)) return `<span class="jn">${match}</span>`;
-      return `<span class="jp">${match}</span>`;
-    },
-  );
-}
-
-function softTick(
-  prev: ModelTick | null,
-  provider: ProviderId,
-  legal: Dir[],
-): ModelTick {
-  return {
-    provider,
-    request: prev?.request ?? {},
-    response: prev?.response ?? {},
-    latencyMs: prev?.latencyMs ?? 0,
-    legal,
-    held: false,
-  };
-}
-
-function markHeld(prev: ModelTick | null, legal: Dir[]): ModelTick | null {
-  if (!prev) return prev;
-  if (
-    prev.held &&
-    prev.latencyMs === 0 &&
-    prev.legal.length === legal.length &&
-    prev.legal.every((dir, index) => dir === legal[index])
-  ) {
-    return prev;
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
-  return { ...prev, latencyMs: 0, legal, held: true };
 }
 
-async function fetchModelMove(
-  provider: ProviderId,
-  state: Record<string, unknown>,
-  legal: Dir[],
-  batch: boolean,
-  signal: AbortSignal,
-): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
-  const res = await fetch("/api/systemone-move", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      provider,
-      state,
-      legal_moves: legal,
-      batch,
-    }),
-    signal,
-  });
-  // Prefer text→JSON so non-JSON 500 HTML never surfaces Safari's
-  // "The string did not match the expected pattern" from res.json().
-  const text = await res.text();
-  let data: Record<string, unknown>;
-  try {
-    data = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-  } catch {
-    data = {
-      error: res.ok
-        ? "Invalid JSON from /api/systemone-move"
-        : `HTTP ${res.status} (non-JSON response from server)`,
-      raw: text.slice(0, 400),
-    };
+@media (prefers-reduced-motion: reduce) {
+  .endgame-overlay,
+  .endgame-card,
+  .shortcut-overlay {
+    animation: none;
   }
-  return { ok: res.ok, status: res.status, data };
 }
 
-function tickFromData(
-  provider: ProviderId,
-  legal: Dir[],
-  data: Record<string, unknown>,
-  fallbackState: unknown,
-): ModelTick {
-  return {
-    provider,
-    request: data.request ?? fallbackState,
-    response: (data.response as ModelResponse) ||
-      (data.body as ModelResponse) ||
-      {},
-    latencyMs: typeof data.latencyMs === "number" ? data.latencyMs : 0,
-    legal,
-    held: false,
-  };
+/* ---------- Body: board | probs ---------- */
+.main {
+  display: grid;
+  grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  width: 100%;
 }
 
-export default function SnakeApp() {
-  const [game, setGame] = useState<Game>(() => createGame(DEFAULT_W, DEFAULT_H));
-  const [running, setRunning] = useState(false);
-  const [batch, setBatch] = useState(false);
-  const [playMode, setPlayMode] = useState<PlayMode>("jev");
-  /** Which model's choice moves the snake when comparing. */
-  const [driveWith, setDriveWith] = useState<ProviderId>("jev");
-
-  // Optional deep-link: ?mode=jev|drex|compare
-  useEffect(() => {
-    try {
-      const m = new URLSearchParams(window.location.search).get("mode");
-      if (m === "jev" || m === "drex" || m === "compare") {
-        setPlayMode(m);
-        if (m !== "compare") setDriveWith(m);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-  const [gearOpen, setGearOpen] = useState(false);
-  const [ticks, setTicks] = useState<Partial<Record<ProviderId, ModelTick>>>({});
-  const [sessionStats, setSessionStats] = useState<SessionStats>(() =>
-    emptySessionStats(),
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [tickMs, setTickMs] = useState(DEFAULT_TICK_MS);
-
-  const gameRef = useRef(game);
-  const runningRef = useRef(false);
-  const busyRef = useRef(false);
-  const batchRef = useRef(false);
-  const playModeRef = useRef<PlayMode>(playMode);
-  const driveWithRef = useRef<ProviderId>(driveWith);
-  const holdRef = useRef<StraightHold | null>(null);
-  const requestRef = useRef<AbortController | null>(null);
-  const runVersionRef = useRef(0);
-  const lastActiveRef = useRef(Date.now());
-  const gearRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    gameRef.current = game;
-  }, [game]);
-  useEffect(() => {
-    batchRef.current = batch;
-  }, [batch]);
-  useEffect(() => {
-    playModeRef.current = playMode;
-  }, [playMode]);
-  useEffect(() => {
-    driveWithRef.current = driveWith;
-  }, [driveWith]);
-
-  const bumpActivity = useCallback(() => {
-    lastActiveRef.current = Date.now();
-  }, []);
-
-  const stopAutoplay = useCallback((message?: string) => {
-    runningRef.current = false;
-    runVersionRef.current += 1;
-    requestRef.current?.abort();
-    requestRef.current = null;
-    busyRef.current = false;
-    holdRef.current = null;
-    setRunning(false);
-    if (message) setError(message);
-  }, []);
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.hidden && runningRef.current) {
-        stopAutoplay(
-          "Autoplay stopped — tab hidden (saves API tokens). Hit Start to resume.",
-        );
-      }
-    };
-    const onAct = () => bumpActivity();
-    document.addEventListener("visibilitychange", onVis);
-    window.addEventListener("pointerdown", onAct);
-    window.addEventListener("keydown", onAct);
-    window.addEventListener("mousemove", onAct, { passive: true });
-    window.addEventListener("scroll", onAct, { passive: true });
-    const id = window.setInterval(() => {
-      if (!runningRef.current) return;
-      if (document.hidden) return;
-      if (Date.now() - lastActiveRef.current < AUTOPLAY_IDLE_MS) return;
-      stopAutoplay(
-        "Autoplay stopped after 1 min idle — no API calls while you're away. Hit Start to resume.",
-      );
-    }, 5000);
-    return () => {
-      document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("pointerdown", onAct);
-      window.removeEventListener("keydown", onAct);
-      window.removeEventListener("mousemove", onAct);
-      window.removeEventListener("scroll", onAct);
-      window.clearInterval(id);
-    };
-  }, [bumpActivity, stopAutoplay]);
-
-  useEffect(() => {
-    if (!gearOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      if (gearRef.current && !gearRef.current.contains(e.target as Node)) {
-        setGearOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [gearOpen]);
-
-  const reset = useCallback(() => {
-    stopAutoplay();
-    setError(null);
-    setTicks({});
-    setSessionStats(emptySessionStats());
-    const g = createGame(DEFAULT_W, DEFAULT_H);
-    gameRef.current = g;
-    setGame(g);
-  }, [stopAutoplay]);
-
-  const changePlayMode = useCallback(
-    (mode: PlayMode) => {
-      if (mode === playMode) return;
-      stopAutoplay();
-      setPlayMode(mode);
-      setTicks({});
-      setSessionStats(emptySessionStats());
-      setError(null);
-      if (mode !== "compare") setDriveWith(mode);
-    },
-    [playMode, stopAutoplay],
-  );
-
-  const step = useCallback(
-    async (runVersion: number): Promise<boolean> => {
-      if (busyRef.current) return false;
-      const g = gameRef.current;
-      if (g.status !== "playing") {
-        stopAutoplay();
-        return false;
-      }
-
-      const legal = legalMoves(g);
-      if (!legal.length) {
-        const lost = {
-          ...g,
-          status: "lost" as const,
-          lossReason: "trapped" as const,
-        };
-        gameRef.current = lost;
-        setGame(lost);
-        stopAutoplay();
-        return false;
-      }
-
-      const hold = holdRef.current;
-      const targetMatches =
-        hold &&
-        g.food &&
-        hold.target.x === g.food.x &&
-        hold.target.y === g.food.y;
-      if (
-        hold &&
-        targetMatches &&
-        legal.includes(hold.dir) &&
-        straightShotSteps(g, hold.dir) !== null
-      ) {
-        const next = applyMove(g, hold.dir);
-        const ateFood =
-          next.challenges.foodsEaten !== g.challenges.foodsEaten;
-        gameRef.current = next;
-        setGame(next);
-        setTicks((prev) => {
-          const out: Partial<Record<ProviderId, ModelTick>> = {};
-          for (const id of ["jev", "drex"] as const) {
-            if (prev[id]) out[id] = markHeld(prev[id]!, legal)!;
-          }
-          return out;
-        });
-        // Held ticks skip every provider API call — credit the active driver.
-        setSessionStats((prev) => {
-          const mode = playModeRef.current;
-          const driver: ProviderId =
-            mode === "compare" ? driveWithRef.current : mode;
-          return { ...prev, [driver]: recordHeldMove(prev[driver]) };
-        });
-
-        if (
-          ateFood ||
-          next.status !== "playing" ||
-          straightShotSteps(next, hold.dir) === null
-        ) {
-          holdRef.current = null;
-        }
-        if (next.status !== "playing") {
-          stopAutoplay();
-          return false;
-        }
-        return true;
-      }
-
-      holdRef.current = null;
-      busyRef.current = true;
-      const useBatch = batchRef.current;
-      const mode = playModeRef.current;
-      const driver: ProviderId =
-        mode === "compare" ? driveWithRef.current : mode;
-      const providers: ProviderId[] =
-        mode === "compare" ? ["jev", "drex"] : [mode];
-      const state = serializeState(g, legal);
-      const controller = new AbortController();
-      requestRef.current = controller;
-
-      setTicks((prev) => {
-        const next: Partial<Record<ProviderId, ModelTick>> = { ...prev };
-        for (const p of providers) {
-          next[p] = softTick(prev[p] ?? null, p, legal);
-        }
-        return next;
-      });
-      setError(null);
-
-      try {
-        const results = await Promise.all(
-          providers.map((p) =>
-            fetchModelMove(p, state, legal, useBatch, controller.signal).then(
-              (r) => [p, r] as const,
-            ),
-          ),
-        );
-
-        if (
-          controller.signal.aborted ||
-          runVersion !== runVersionRef.current ||
-          !runningRef.current
-        ) {
-          return false;
-        }
-
-        const byProvider = Object.fromEntries(results) as Record<
-          ProviderId,
-          { ok: boolean; status: number; data: Record<string, unknown> }
-        >;
-
-        const nextTicks: Partial<Record<ProviderId, ModelTick>> = {};
-        for (const p of providers) {
-          const r = byProvider[p];
-          nextTicks[p] = tickFromData(p, legal, r.data, state);
-        }
-        setTicks(nextTicks);
-
-        setSessionStats((prev) => {
-          let next = { ...prev };
-          for (const p of providers) {
-            const r = byProvider[p];
-            const res = (r.data.response as ModelResponse | undefined) || {};
-            const illegal =
-              r.ok &&
-              (!isDir(res.choice) || !legal.includes(res.choice as Dir));
-            next = {
-              ...next,
-              [p]: recordApiTick(next[p], {
-                ok: r.ok && !illegal,
-                latencyMs:
-                  typeof r.data.latencyMs === "number" ? r.data.latencyMs : 0,
-                choice: typeof res.choice === "string" ? res.choice : null,
-                confidence:
-                  typeof res.confidence === "number" ? res.confidence : null,
-                evaluationTimeMs:
-                  typeof res.evaluation_time_ms === "number"
-                    ? res.evaluation_time_ms
-                    : null,
-                usage: res.usage,
-              }),
-            };
-          }
-          if (mode === "compare") {
-            const jChoice = nextTicks.jev?.response?.choice;
-            const dChoice = nextTicks.drex?.response?.choice;
-            next = recordCompareAgreement(
-              next,
-              typeof jChoice === "string" ? jChoice : null,
-              typeof dChoice === "string" ? dChoice : null,
-            );
-          }
-          return next;
-        });
-
-        const driveResult = byProvider[driver];
-        if (!driveResult.ok) {
-          setError(
-            (driveResult.data.error as string) ||
-              `HTTP ${driveResult.status}`,
-          );
-          stopAutoplay();
-          return false;
-        }
-
-        const move = (driveResult.data.response as ModelResponse | undefined)
-          ?.choice;
-        if (!isDir(move) || !legal.includes(move)) {
-          const label = PROVIDER_LABEL[driver];
-          setError(
-            !move
-              ? `${label} returned no Choice — autoplay stopped (no local fallback).`
-              : `${label} chose illegal move "${move}" — autoplay stopped (no local fallback).`,
-          );
-          stopAutoplay();
-          return false;
-        }
-
-        const shotSteps = straightShotSteps(g, move);
-        const next = applyMove(g, move);
-        const ateFood =
-          next.challenges.foodsEaten !== g.challenges.foodsEaten;
-        if (
-          shotSteps !== null &&
-          shotSteps > 1 &&
-          !ateFood &&
-          next.status === "playing" &&
-          next.food &&
-          straightShotSteps(next, move) !== null
-        ) {
-          holdRef.current = { dir: move, target: { ...next.food } };
-        }
-        gameRef.current = next;
-        setGame(next);
-
-        if (next.status !== "playing") {
-          stopAutoplay();
-          return false;
-        }
-        return true;
-      } catch (e) {
-        if (controller.signal.aborted) return false;
-        setError(e instanceof Error ? e.message : String(e));
-        stopAutoplay();
-        return false;
-      } finally {
-        if (requestRef.current === controller) {
-          requestRef.current = null;
-          busyRef.current = false;
-        }
-      }
-    },
-    [stopAutoplay],
-  );
-
-  useEffect(() => {
-    if (!running) return;
-    let cancelled = false;
-    let timeoutId: number | undefined;
-    let wakeTimeout: (() => void) | undefined;
-    const runVersion = runVersionRef.current;
-    (async () => {
-      while (!cancelled && runningRef.current) {
-        const startedAt = performance.now();
-        const ok = await step(runVersion);
-        if (!ok || cancelled || !runningRef.current) break;
-        const waitMs = Math.max(0, tickMs - (performance.now() - startedAt));
-        if (waitMs > 0) {
-          await new Promise<void>((resolve) => {
-            wakeTimeout = resolve;
-            timeoutId = window.setTimeout(resolve, waitMs);
-          });
-          wakeTimeout = undefined;
-          timeoutId = undefined;
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
-      wakeTimeout?.();
-      if (runVersionRef.current === runVersion) {
-        runVersionRef.current += 1;
-        requestRef.current?.abort();
-        requestRef.current = null;
-        busyRef.current = false;
-      }
-    };
-  }, [running, tickMs, step]);
-
-  const toggleRun = () => {
-    if (game.status !== "playing") return;
-    const next = !runningRef.current;
-    if (next) {
-      runVersionRef.current += 1;
-      lastActiveRef.current = Date.now();
-      setError(null);
-      runningRef.current = true;
-      setRunning(true);
-    } else {
-      stopAutoplay();
-    }
-  };
-
-  const driverId: ProviderId =
-    playMode === "compare" ? driveWith : playMode;
-  const driverTick = ticks[driverId] ?? null;
-  const legal = driverTick?.legal || legalMoves(game);
-  const legalSet = useMemo(() => new Set(legal), [legal]);
-
-  const statusKind =
-    game.status === "won"
-      ? "won"
-      : game.status === "lost"
-        ? game.lossReason === "self"
-          ? "self-crash"
-          : "collision"
-        : running
-          ? "running"
-          : "idle";
-
-  const statusLabel =
-    statusKind === "won"
-      ? "Won"
-      : statusKind === "self-crash"
-        ? "Self crash"
-        : statusKind === "collision"
-          ? "Collision"
-          : statusKind === "running"
-            ? "Running"
-            : "Idle";
-
-  const announcement = useMemo(() => endgameAnnouncement(game), [game]);
-
-  const latencyLabel = useMemo(() => {
-    if (playMode === "compare") {
-      const j = ticks.jev;
-      const d = ticks.drex;
-      if (j?.held || d?.held) return "held · 0 ms";
-      const parts: string[] = [];
-      if (j?.latencyMs != null) parts.push(`J ${j.latencyMs}`);
-      if (d?.latencyMs != null) parts.push(`D ${d.latencyMs}`);
-      return parts.length ? `${parts.join(" / ")} ms` : "—";
-    }
-    const t = ticks[playMode];
-    if (t?.held) return "held · 0 ms";
-    return t?.latencyMs != null ? `${t.latencyMs} ms` : "—";
-  }, [playMode, ticks]);
-
-  const comparePayload = useMemo(() => {
-    if (playMode !== "compare") return null;
-    const j = ticks.jev ? buildCallView(ticks.jev).payload : null;
-    const d = ticks.drex ? buildCallView(ticks.drex).payload : null;
-    if (!j && !d) return null;
-    return { jev: j, drex: d };
-  }, [playMode, ticks]);
-
-  const singleCallView = useMemo(
-    () => buildCallView(playMode === "compare" ? driverTick : ticks[playMode] ?? null),
-    [playMode, ticks, driverTick],
-  );
-
-  const jsonHtml = useMemo(() => {
-    if (playMode === "compare") {
-      return comparePayload ? highlightJson(comparePayload) : "";
-    }
-    return singleCallView.payload ? highlightJson(singleCallView.payload) : "";
-  }, [playMode, comparePayload, singleCallView.payload]);
-
-  const headMeta = singleCallView.head
-    ? `[${singleCallView.head[0]}, ${singleCallView.head[1]}]`
-    : "—";
-  const foodMeta = singleCallView.food
-    ? `[${singleCallView.food[0]}, ${singleCallView.food[1]}]`
-    : "—";
-
-  const anyHeld =
-    playMode === "compare"
-      ? Boolean(ticks.jev?.held || ticks.drex?.held)
-      : Boolean(ticks[playMode]?.held);
-  const anyTick =
-    playMode === "compare"
-      ? Boolean(ticks.jev || ticks.drex)
-      : Boolean(ticks[playMode]);
-
-  return (
-    <div className="app">
-      <header className="app-header">
-        <div className="header-left">
-          <h1>jev / snake</h1>
-          <span className={`status-pill ${statusKind}`}>
-            <span className="status-dot" aria-hidden />
-            {statusLabel}
-          </span>
-        </div>
-
-        <div className="header-metrics">
-          <span className="metric score">
-            <span className="metric-label">Score</span>
-            <span className="metric-value">{game.challenges.score}</span>
-          </span>
-          <span className="metric step">
-            <span className="metric-label">Step</span>
-            <span className="metric-value">{game.ticks}</span>
-          </span>
-          <span className="metric latency">
-            <span className="metric-label">Latency</span>
-            <span className="metric-value">{latencyLabel}</span>
-          </span>
-        </div>
-
-        <div className="header-right" role="toolbar" aria-label="Game controls">
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={toggleRun}
-            disabled={game.status !== "playing"}
-            aria-pressed={running}
-          >
-            {running ? "Pause" : "Start"}
-          </button>
-          <button type="button" className="btn btn-outline" onClick={reset}>
-            Reset
-          </button>
-          <div className="btn-gear-wrap" ref={gearRef}>
-            <button
-              type="button"
-              className={"btn btn-gear" + (batch || playMode !== "jev" ? " on" : "")}
-              aria-label="Settings"
-              aria-expanded={gearOpen}
-              title="Settings"
-              onClick={() => setGearOpen((o) => !o)}
-            >
-              ⚙
-            </button>
-            {gearOpen && (
-              <div className="gear-menu" role="menu">
-                <fieldset className="gear-fieldset">
-                  <legend>Model</legend>
-                  {(
-                    [
-                      ["jev", "Jev only"],
-                      ["drex", "Drex only"],
-                      ["compare", "Compare both"],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <label key={value}>
-                      <input
-                        type="radio"
-                        name="play-mode"
-                        checked={playMode === value}
-                        onChange={() => changePlayMode(value)}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </fieldset>
-                {playMode === "compare" && (
-                  <fieldset className="gear-fieldset">
-                    <legend>Drive moves with</legend>
-                    {(["jev", "drex"] as const).map((id) => (
-                      <label key={id}>
-                        <input
-                          type="radio"
-                          name="drive-with"
-                          checked={driveWith === id}
-                          onChange={() => {
-                            stopAutoplay();
-                            setDriveWith(id);
-                          }}
-                        />
-                        {PROVIDER_LABEL[id]} choice
-                      </label>
-                    ))}
-                  </fieldset>
-                )}
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={batch}
-                    onChange={(e) => setBatch(e.target.checked)}
-                  />
-                  Batch foresight
-                </label>
-                <label>
-                  Cadence
-                  <input
-                    type="number"
-                    value={tickMs}
-                    min={0}
-                    step={10}
-                    onChange={(e) =>
-                      setTickMs(Math.max(0, Number(e.target.value) || 0))
-                    }
-                    title="Target milliseconds per move; API request time counts toward it"
-                  />
-                  <span className="muted">ms</span>
-                </label>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <div
-        className="model-bar"
-        role="group"
-        aria-label="Model selection"
-      >
-        <button
-          type="button"
-          className={"model-chip" + (playMode === "jev" ? " active" : "")}
-          aria-pressed={playMode === "jev"}
-          onClick={() => changePlayMode("jev")}
-        >
-          Jev
-        </button>
-        <button
-          type="button"
-          className={"model-chip" + (playMode === "drex" ? " active" : "")}
-          aria-pressed={playMode === "drex"}
-          onClick={() => changePlayMode("drex")}
-        >
-          Drex
-        </button>
-        <button
-          type="button"
-          className={
-            "model-chip model-chip-compare" +
-            (playMode === "compare" ? " active" : "")
-          }
-          aria-pressed={playMode === "compare"}
-          onClick={() => changePlayMode("compare")}
-        >
-          Compare side by side
-        </button>
-        {playMode === "compare" && (
-          <span className="model-drive-hint">
-            Moves apply from{" "}
-            <strong>{PROVIDER_LABEL[driveWith]}</strong>
-            {" · "}
-            <button
-              type="button"
-              className="linkish"
-              onClick={() => {
-                stopAutoplay();
-                setDriveWith((d) => (d === "jev" ? "drex" : "jev"));
-              }}
-            >
-              switch driver
-            </button>
-          </span>
-        )}
-      </div>
-
-      {error && <div className="error-banner">{error}</div>}
-
-      <div className={"main" + (playMode === "compare" ? " main-compare" : "")}>
-        <div className="board-stage">
-          <BoardPanel game={game} />
-          {announcement && (
-            <div
-              className={
-                "endgame-overlay" +
-                (game.status === "won"
-                  ? " endgame-won"
-                  : game.lossReason === "self"
-                    ? " endgame-self"
-                    : " endgame-lost")
-              }
-              role="status"
-              aria-live="polite"
-            >
-              <div className="endgame-card">
-                <p className="endgame-kicker">
-                  {game.status === "won"
-                    ? "Victory"
-                    : game.lossReason === "self"
-                      ? "Classic rule"
-                      : "Ended"}
-                </p>
-                <h2 className="endgame-title">{announcement.title}</h2>
-                <p className="endgame-detail">{announcement.detail}</p>
-                <dl className="endgame-stats">
-                  <div>
-                    <dt>Score</dt>
-                    <dd>{game.challenges.score}</dd>
-                  </div>
-                  <div>
-                    <dt>Length</dt>
-                    <dd>{game.snake.length}</dd>
-                  </div>
-                  <div>
-                    <dt>Steps</dt>
-                    <dd>{game.ticks}</dd>
-                  </div>
-                </dl>
-                <button
-                  type="button"
-                  className="btn btn-primary endgame-cta"
-                  onClick={reset}
-                >
-                  Play again
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="side-rail">
-          {playMode === "compare" ? (
-            <div className="compare-probs">
-              <ProbsPanel
-                title="Jev probabilities"
-                provider="jev"
-                tick={ticks.jev ?? null}
-                legalSet={legalSet}
-                currentDir={game.dir}
-                driving={driveWith === "jev"}
-              />
-              <ProbsPanel
-                title="Drex probabilities"
-                provider="drex"
-                tick={ticks.drex ?? null}
-                legalSet={legalSet}
-                currentDir={game.dir}
-                driving={driveWith === "drex"}
-              />
-            </div>
-          ) : (
-            <ProbsPanel
-              title="Move Probabilities"
-              provider={playMode}
-              tick={ticks[playMode] ?? null}
-              legalSet={legalSet}
-              currentDir={game.dir}
-              driving
-            />
-          )}
-          <StatsBoard
-            playMode={playMode}
-            driveWith={driveWith}
-            game={game}
-            ticks={ticks}
-            sessionStats={sessionStats}
-          />
-        </div>
-      </div>
-
-      <FlowSampler
-        playMode={playMode}
-        driveWith={driveWith}
-        running={running}
-        ticks={ticks}
-        sessionStats={sessionStats}
-        gameTicks={game.ticks}
-        score={game.challenges.score}
-      />
-
-      <JsonPanel
-        headMeta={headMeta}
-        foodMeta={foodMeta}
-        html={jsonHtml}
-        empty={!anyTick}
-        held={anyHeld}
-        compare={playMode === "compare"}
-      />
-    </div>
-  );
+.main-compare {
+  grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
 }
 
-/* ---------- memoized panels ---------- */
-
-const BoardPanel = memo(function BoardPanel({ game }: { game: Game }) {
-  const occupied = useMemo(() => {
-    const map = new Map<string, "H" | "o" | "*">();
-    for (let i = game.snake.length - 1; i >= 0; i--) {
-      const p = game.snake[i];
-      map.set(`${p.x},${p.y}`, i === 0 ? "H" : "o");
-    }
-    if (game.food) map.set(`${game.food.x},${game.food.y}`, "*");
-    return map;
-  }, [game.snake, game.food]);
-
-  return (
-    <section className="panel board-panel">
-      <div
-        className="board"
-        style={{
-          gridTemplateColumns: `repeat(${game.width}, var(--cell))`,
-          ["--cols" as string]: String(game.width),
-          ["--rows" as string]: String(game.height),
-        }}
-        aria-label="Snake board"
-      >
-        {Array.from({ length: game.height }, (_, y) =>
-          Array.from({ length: game.width }, (_, x) => {
-            const c = occupied.get(`${x},${y}`);
-            if (c === "H") {
-              return (
-                <div key={`${x}-${y}`} className={`cell cell-head dir-${game.dir}`}>
-                  <span className="eye eye-a" />
-                  <span className="eye eye-b" />
-                </div>
-              );
-            }
-            if (c === "o") {
-              return <div key={`${x}-${y}`} className="cell cell-body" />;
-            }
-            if (c === "*") {
-              return (
-                <div key={`${x}-${y}`} className="cell cell-food-wrap">
-                  <span className="food-dot" />
-                </div>
-              );
-            }
-            return <div key={`${x}-${y}`} className="cell cell-empty" />;
-          }),
-        )}
-      </div>
-    </section>
-  );
-});
-
-function fmtMs(n: number | null | undefined) {
-  if (n == null || Number.isNaN(n)) return "—";
-  return `${n} ms`;
+.side-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
 }
 
-function StatsMetricRows({
-  stats,
-  tick,
-}: {
-  stats: ProviderSessionStats;
-  tick: ModelTick | null;
-}) {
-  const avgLatency = avgMs(stats.latencySum, stats.latencyCount);
-  const avgEval = avgMs(stats.evalTimeSum, stats.evalTimeCount);
-  const avgConf = avgRatio(stats.confidenceSum, stats.confidenceCount);
-  const agree = agreementRate(stats);
-  const lastChoice = stats.lastChoice ?? tick?.response?.choice ?? null;
-  const lastConf =
-    stats.lastConfidence ??
-    (typeof tick?.response?.confidence === "number"
-      ? tick.response.confidence
-      : null);
-  const lastLat =
-    stats.lastLatencyMs ??
-    (tick && !tick.held ? tick.latencyMs : null);
-  const lastEval =
-    stats.lastEvalTimeMs ??
-    (typeof tick?.response?.evaluation_time_ms === "number"
-      ? tick.response.evaluation_time_ms
-      : null);
-
-  return (
-    <dl className="stats-metrics">
-      <div>
-        <dt>API calls</dt>
-        <dd>{stats.apiCalls}</dd>
-      </div>
-      <div>
-        <dt>Held</dt>
-        <dd>{stats.heldMoves}</dd>
-      </div>
-      <div>
-        <dt>Errors</dt>
-        <dd className={stats.errors > 0 ? "stats-warn" : undefined}>
-          {stats.errors}
-        </dd>
-      </div>
-      <div>
-        <dt>Last latency</dt>
-        <dd>{fmtMs(lastLat)}</dd>
-      </div>
-      <div>
-        <dt>Avg latency</dt>
-        <dd>{fmtMs(avgLatency)}</dd>
-      </div>
-      <div>
-        <dt>Eval time</dt>
-        <dd title="Last / avg evaluation_time_ms from upstream">
-          {fmtMs(lastEval)}
-          {avgEval != null ? (
-            <span className="stats-sub"> · avg {fmtMs(avgEval)}</span>
-          ) : null}
-        </dd>
-      </div>
-      <div>
-        <dt>Tokens in/out</dt>
-        <dd>
-          {stats.inputTokens || stats.outputTokens
-            ? `${stats.inputTokens} / ${stats.outputTokens}`
-            : "—"}
-        </dd>
-      </div>
-      <div>
-        <dt>Last choice</dt>
-        <dd className="stats-choice">{lastChoice || "—"}</dd>
-      </div>
-      <div>
-        <dt>Confidence</dt>
-        <dd>
-          {fmtPct(lastConf)}
-          {avgConf != null ? (
-            <span className="stats-sub"> · avg {fmtPct(avgConf)}</span>
-          ) : null}
-        </dd>
-      </div>
-      {stats.comparedChoices > 0 && (
-        <div>
-          <dt>Agree w/ peer</dt>
-          <dd>
-            {fmtPct(agree)}{" "}
-            <span className="stats-sub">
-              ({stats.agreements}/{stats.comparedChoices})
-            </span>
-          </dd>
-        </div>
-      )}
-    </dl>
-  );
+.compare-probs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  min-width: 0;
+  width: 100%;
 }
 
-const StatsBoard = memo(function StatsBoard({
-  playMode,
-  driveWith,
-  game,
-  ticks,
-  sessionStats,
-}: {
-  playMode: PlayMode;
-  driveWith: ProviderId;
-  game: Game;
-  ticks: Partial<Record<ProviderId, ModelTick>>;
-  sessionStats: SessionStats;
-}) {
-  const providers: ProviderId[] =
-    playMode === "compare" ? ["jev", "drex"] : [playMode];
+.compare-probs .probs-panel {
+  max-width: none;
+}
 
-  return (
-    <section className="panel stats-board" aria-label="Model statistics">
-      <div className="panel-head">
-        <h2 className="panel-title">
-          {playMode === "compare" ? "Session stats · compare" : "Session stats"}
-        </h2>
-        <span className="panel-meta">
-          score {game.challenges.score} · len {game.snake.length} · steps{" "}
-          {game.ticks}
-          {game.challenges.foodsEaten
-            ? ` · foods ${game.challenges.foodsEaten}`
-            : ""}
-        </span>
-      </div>
-      <div
-        className={
-          "stats-columns" +
-          (playMode === "compare" ? " stats-columns-compare" : "")
-        }
-      >
-        {providers.map((id) => (
-          <div
-            key={id}
-            className={
-              "stats-col" +
-              (playMode === "compare" && driveWith === id
-                ? " stats-col-driving"
-                : "")
-            }
-          >
-            <div className="stats-col-head">
-              <span className="stats-provider">{PROVIDER_LABEL[id]}</span>
-              {playMode === "compare" && driveWith === id && (
-                <span className="drive-badge">driving</span>
-              )}
-              {ticks[id]?.response?.model ? (
-                <span className="stats-model">{String(ticks[id]!.response!.model)}</span>
-              ) : null}
-            </div>
-            <StatsMetricRows stats={sessionStats[id]} tick={ticks[id] ?? null} />
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-});
+/* ---------- Session stats (beside probs) ---------- */
+.stats-board {
+  width: 100%;
+  max-width: none;
+  padding: 0 0 10px;
+}
 
-const ProbsPanel = memo(function ProbsPanel({
-  title,
-  provider,
-  tick,
-  legalSet,
-  currentDir,
-  driving,
-}: {
-  title: string;
-  provider: ProviderId;
-  tick: ModelTick | null;
-  legalSet: Set<Dir>;
-  currentDir: Dir;
-  driving: boolean;
-}) {
-  const probs = tick?.response?.probabilities || {};
-  const chosen = (tick?.response?.choice as string) || "";
-  const chosenPct =
-    chosen && typeof probs[chosen] === "number" ? fmtPct(probs[chosen]) : null;
-  const held = tick?.held ?? false;
-  const choiceText = choiceLabel(
-    chosen,
-    chosenPct,
-    held,
-    PROVIDER_LABEL[provider],
-  );
-  const conf =
-    typeof tick?.response?.confidence === "number"
-      ? fmtPct(tick.response.confidence)
-      : null;
+.stats-board-collapsed {
+  padding-bottom: 8px;
+}
 
-  return (
-    <section
-      className={
-        "panel probs-panel" + (driving ? " probs-driving" : " probs-reference")
-      }
-    >
-      <div className="panel-head">
-        <h2 className="panel-title">
-          {title}
-          {driving && <span className="drive-badge">driving</span>}
-        </h2>
-        <span className="panel-meta">
-          {choiceText}
-          {conf ? ` · conf ${conf}` : ""}
-          {tick?.latencyMs != null && !held ? ` · ${tick.latencyMs} ms` : ""}
-        </span>
-      </div>
-      <div className="prob-list">
-        {ALL_DIRS.map((m) => {
-          const ok = legalSet.has(m);
-          const p = ok ? Number(probs[m] ?? 0) : 0;
-          const active = Boolean(chosen) && m === chosen;
-          const tag = tagForMove(m, currentDir, legalSet);
-          const pctStr = ok ? fmtPct(p) : "0.0%";
-          const widthPct = ok ? Math.max(0, Math.min(100, p * 100)) : 0;
-          return (
-            <div key={m} className={"prob-row" + (active ? " chosen" : "")}>
-              <span className="prob-label">
-                <span className="arrow" aria-hidden>
-                  {DIR_ARROW[m]}
-                </span>
-                {m}
-              </span>
-              <div className="prob-track">
-                <div className="prob-fill" style={{ width: `${widthPct}%` }} />
-              </div>
-              <span className="prob-pct">{pctStr}</span>
-              <span className={`prob-tag ${tag}`}>{tag}</span>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-});
+.stats-board .panel-head {
+  padding: 12px 14px 8px;
+}
 
-const JsonPanel = memo(function JsonPanel({
-  headMeta,
-  foodMeta,
-  html,
-  empty,
-  held,
-  compare,
-}: {
-  headMeta: string;
-  foodMeta: string;
-  html: string;
-  empty: boolean;
-  held: boolean;
-  compare: boolean;
-}) {
-  return (
-    <section className="panel json-panel">
-      <div className="panel-head">
-        <h2 className="panel-title">
-          {compare ? "Last compare · /v1/systemone" : "Last /v1/systemone Call"}
-        </h2>
-        <span className="panel-meta">
-          {held && <span className="held-indicator">held · no API this tick</span>}
-          head {headMeta} · food {foodMeta}
-        </span>
-      </div>
-      {empty ? (
-        <pre className="json-body json-empty">Waiting for first tick…</pre>
-      ) : (
-        <pre className="json-body" dangerouslySetInnerHTML={{ __html: html }} />
-      )}
-    </section>
-  );
-});
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.stats-columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  padding: 0 10px 4px;
+}
+
+.stats-columns-compare {
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stats-col {
+  min-width: 0;
+  padding: 8px 10px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+}
+
+.stats-columns:not(.stats-columns-compare) .stats-col {
+  background: transparent;
+  padding: 0 4px 4px;
+}
+
+.stats-col-driving {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.stats-col-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 8px;
+  min-height: 22px;
+}
+
+.stats-provider {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: -0.01em;
+}
+
+.stats-model {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin: 0;
+}
+
+.stats-metrics > div {
+  margin: 0;
+  min-width: 0;
+}
+
+.stats-metrics dt {
+  margin: 0;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.stats-metrics dd {
+  margin: 1px 0 0;
+  font-size: 0.86rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: #111827;
+  line-height: 1.25;
+}
+
+.stats-metrics dd.stats-warn {
+  color: #dc2626;
+}
+
+.stats-metrics dd.stats-choice {
+  text-transform: lowercase;
+}
+
+.stats-sub {
+  font-weight: 500;
+  font-size: 0.72rem;
+  color: #6b7280;
+}
+
+.probs-driving {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.12);
+}
+
+.probs-reference {
+  opacity: 0.96;
+}
+
+.drive-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  contain: layout style;
+  min-width: 0;
+}
+
+.board-panel {
+  width: 100%;
+  max-width: 540px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board {
+  --cols: 12;
+  --rows: 12;
+  --cell: clamp(22px, calc((100vw - 56px) / var(--cols)), 40px);
+  --gap: 1px;
+  display: grid;
+  gap: var(--gap);
+  width: calc(var(--cols) * var(--cell) + (var(--cols) - 1) * var(--gap));
+  height: calc(var(--rows) * var(--cell) + (var(--rows) - 1) * var(--gap));
+  max-width: 100%;
+  background: #e5e7eb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.cell {
+  width: var(--cell);
+  height: var(--cell);
+  background: #fff;
+  position: relative;
+}
+
+.cell-empty { background: #fff; }
+
+.cell-body,
+.cell-head {
+  background: #fff;
+}
+
+.cell-body::before,
+.cell-head::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 8px;
+  background: #3b82f6;
+}
+
+.cell-head::before {
+  background: #2563eb;
+}
+
+.cell-head {
+  position: relative;
+  z-index: 1;
+}
+
+.cell-food-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+
+.food-dot {
+  width: calc(var(--cell) * 0.45);
+  height: calc(var(--cell) * 0.45);
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+/* Eyes oriented by direction */
+.eye {
+  z-index: 2;
+  position: absolute;
+  width: max(4px, calc(var(--cell) * 0.125));
+  height: max(4px, calc(var(--cell) * 0.125));
+  border-radius: 50%;
+  background: #fff;
+  pointer-events: none;
+}
+
+.cell-head.dir-right .eye-a { top: 20%; right: 18%; }
+.cell-head.dir-right .eye-b { bottom: 20%; right: 18%; }
+.cell-head.dir-left .eye-a { top: 20%; left: 18%; }
+.cell-head.dir-left .eye-b { bottom: 20%; left: 18%; }
+.cell-head.dir-up .eye-a { top: 18%; left: 20%; }
+.cell-head.dir-up .eye-b { top: 18%; right: 20%; }
+.cell-head.dir-down .eye-a { bottom: 18%; left: 20%; }
+.cell-head.dir-down .eye-b { bottom: 18%; right: 20%; }
+
+/* ---------- Move Probabilities ---------- */
+.probs-panel {
+  width: 100%;
+  max-width: 420px;
+  min-height: 0;
+  height: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (min-width: 900px) {
+  .probs-panel {
+    height: 540px;
+    max-height: 540px;
+  }
+}
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  color: #111827;
+}
+
+.panel-meta {
+  font-size: 0.75rem;
+  color: #6b7280;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.held-indicator {
+  display: inline-block;
+  margin-right: 10px;
+  color: #2563eb;
+  font-weight: 650;
+}
+
+.prob-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+
+.prob-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) 52px 44px;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.prob-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+.prob-label .arrow {
+  width: 14px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.prob-row.chosen .prob-label {
+  color: #2563eb;
+  font-weight: 650;
+}
+
+.prob-row.chosen .prob-label .arrow { color: #2563eb; }
+
+.prob-track {
+  width: 100%;
+  max-width: 180px;
+  height: 8px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  overflow: hidden;
+  justify-self: stretch;
+}
+
+.prob-fill {
+  height: 100%;
+  width: 0;
+  background: #cbd5e1;
+  border-radius: 4px;
+  transition: width 100ms linear;
+}
+
+.prob-row.chosen .prob-fill {
+  background: #2563eb;
+}
+
+.prob-pct {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #6b7280;
+  text-align: right;
+}
+
+.prob-tag {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.prob-tag.safe { color: #22c55e; }
+.prob-tag.neck,
+.prob-tag.body { color: #ef4444; }
+
+/* ---------- Full-width JSON under board+probs ---------- */
+.json-panel {
+  width: 100%;
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.json-panel .panel-head {
+  margin-bottom: 10px;
+}
+
+.json-body {
+  margin: 0;
+  flex: 1;
+  min-height: 180px;
+  max-height: 320px;
+  overflow: auto;
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.55;
+  color: #111827;
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+  -webkit-overflow-scrolling: touch;
+}
+
+.json-body .jk { color: #2563eb; }
+.json-body .js { color: #b45309; }
+.json-body .jn { color: #c2410c; }
+.json-body .jb { color: #7c3aed; }
+.json-body .jnul { color: #9ca3af; }
+.json-body .jp { color: #6b7280; }
+
+.json-empty {
+  color: #9ca3af;
+  font-style: normal;
+}
+
+.muted { color: #6b7280; font-size: 0.75rem; }
+
+/* ---------- Mobile / tablet ---------- */
+@media (max-width: 899px) {
+  .app {
+    gap: 12px;
+    padding: 12px 10px 24px;
+  }
+
+  .app-header {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .header-left {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .header-metrics {
+    justify-self: stretch;
+    justify-content: space-between;
+    width: 100%;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+  }
+
+  .metric.score,
+  .metric.step,
+  .metric.latency {
+    min-width: 0;
+  }
+
+  .header-right {
+    justify-self: stretch;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 8px;
+  }
+
+  .header-right .btn {
+    min-height: 44px;
+    width: 100%;
+  }
+
+  .header-right .btn-primary,
+  .header-right .btn-outline {
+    min-width: 0;
+  }
+
+  .btn-gear {
+    width: 44px;
+    height: 44px;
+  }
+
+  .main {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .compare-probs {
+    grid-template-columns: 1fr;
+  }
+
+  .stats-columns-compare {
+    grid-template-columns: 1fr;
+  }
+
+  .model-drive-hint {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .board-panel {
+    max-width: none;
+    padding: 12px;
+  }
+
+  .board-stage {
+    max-width: none;
+  }
+
+  .board {
+    --cell: clamp(20px, calc((100vw - 48px) / var(--cols)), 36px);
+  }
+
+  .probs-panel {
+    max-width: none;
+  }
+
+  .panel-meta {
+    white-space: normal;
+  }
+
+  .prob-row {
+    grid-template-columns: 64px minmax(0, 1fr) 48px 40px;
+    gap: 8px;
+  }
+
+  .prob-track {
+    max-width: none;
+  }
+}
+
+@media (max-width: 420px) {
+  .header-left h1 {
+    font-size: 0.95rem;
+  }
+
+  .metric-label {
+    font-size: 0.7rem;
+  }
+
+  .metric-value {
+    font-size: 0.82rem;
+  }
+
+  .prob-row {
+    grid-template-columns: 56px minmax(0, 1fr) 44px 36px;
+  }
+}
+
+/* ---------- Flow sampler (application flow animation) ---------- */
+.flow-sampler {
+  --fs-ink: #1a2332;
+  --fs-muted: #5c6b7a;
+  --fs-teal: #2a9d8f;
+  --fs-teal-deep: #1d7a6f;
+  --fs-warm: #c45c26;
+  --fs-warm-soft: #e8a87c;
+  --fs-line: #c5d4de;
+  --fs-panel: rgba(255, 255, 255, 0.72);
+  --fs-grid: rgba(42, 157, 143, 0.09);
+  position: relative;
+  width: 100%;
+  padding: 16px 16px 12px;
+  border: 1px solid var(--fs-line);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(248, 250, 252, 0.8));
+  overflow: hidden;
+}
+
+.flow-sampler::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(var(--fs-grid) 1px, transparent 1px), linear-gradient(90deg, var(--fs-grid) 1px, transparent 1px);
+  background-size: 18px 18px;
+  pointer-events: none;
+}
+
+.flow-sampler > * {
+  position: relative;
+  z-index: 1;
+}
+
+.fs-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fs-brand {
+  min-width: 0;
+}
+
+.fs-eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--fs-muted);
+}
+
+.fs-title {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: -0.03em;
+  color: var(--fs-ink);
+}
+
+.fs-badge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  text-align: right;
+}
+
+.fs-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(42, 157, 143, 0.08);
+  border: 1px solid rgba(42, 157, 143, 0.25);
+  color: var(--fs-teal-deep);
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fs-meta {
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--fs-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.fs-meta-accent {
+  color: var(--fs-teal-deep);
+  font-weight: 700;
+}
+
+.fs-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.fs-pane {
+  position: relative;
+  border: 1px solid var(--fs-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.76);
+  padding: 10px 10px 8px;
+  min-height: 180px;
+}
+
+.fs-pane-parallel {
+  border-color: rgba(42, 157, 143, 0.4);
+  background: rgba(247, 252, 251, 0.86);
+}
+
+.fs-pane-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fs-muted);
+}
+
+.fs-pane-model {
+  color: var(--fs-teal-deep);
+}
+
+.fs-pane-tag {
+  margin: 8px 0 6px;
+  color: var(--fs-warm);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.fs-viz {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 120px;
+}
+
+.fs-svg {
+  width: 100%;
+  height: 100%;
+  max-width: 260px;
+}
+
+.fs-serial-trail {
+  stroke: rgba(30, 41, 59, 0.15);
+  stroke-width: 2.2;
+  fill: none;
+}
+
+.fs-serial-draw {
+  stroke: var(--fs-warm);
+  stroke-width: 2.2;
+  fill: none;
+  stroke-dasharray: 270;
+  stroke-dashoffset: 270;
+  animation: fs-serial-draw 1.8s ease-in-out infinite alternate;
+}
+
+.fs-serial-dot {
+  fill: rgba(30, 41, 59, 0.35);
+}
+
+.fs-serial-dot.on {
+  fill: var(--fs-warm);
+}
+
+.fs-serial-focus {
+  fill: rgba(196, 92, 38, 0.12);
+  stroke: var(--fs-warm);
+  stroke-width: 1.5;
+}
+
+.fs-serial-num,
+.fs-burst-label {
+  fill: var(--fs-ink);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.fs-burst-ring {
+  fill: none;
+  stroke: rgba(42, 157, 143, 0.28);
+  stroke-width: 1.2;
+  transform-origin: center;
+  animation: fs-ring 1.7s ease-out infinite;
+}
+
+.fs-burst-ring.delay {
+  animation-delay: 0.25s;
+}
+
+.fs-burst-ray {
+  stroke: rgba(42, 157, 143, 0.75);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  animation: fs-ray-pulse 1.8s ease-in-out infinite;
+}
+
+.fs-burst-core {
+  fill: var(--fs-teal);
+  transform-origin: center;
+  animation: fs-core 1.4s ease-in-out infinite;
+}
+
+.fs-pane-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.58rem;
+  color: var(--fs-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.fs-clock-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fs-clock {
+  width: 120px;
+  height: 28px;
+}
+
+.fs-clock-base {
+  stroke: rgba(30, 41, 59, 0.35);
+  stroke-width: 1.2;
+}
+
+.fs-clock-bead {
+  fill: var(--fs-warm);
+  offset-path: path("M 0,20 C 12,4 26,18 40,10 S 74,0 112,8");
+  animation: fs-bead 1.8s linear infinite;
+}
+
+.fs-clock-wave {
+  fill: none;
+  stroke: rgba(42, 157, 143, 0.5);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+.fs-clock-wave.pulse {
+  stroke: rgba(42, 157, 143, 0.9);
+  stroke-dasharray: 18 18;
+  animation: fs-wave 1.8s linear infinite;
+}
+
+.fs-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.fs-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 10px 8px;
+  border: 1px solid var(--fs-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.fs-tile-k {
+  font-size: 0.58rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--fs-muted);
+}
+
+.fs-tile-v {
+  font-size: 1.08rem;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  color: var(--fs-ink);
+}
+
+.fs-tile-sub {
+  font-size: 0.58rem;
+  line-height: 1.3;
+  color: var(--fs-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.fs-spark-bars {
+  display: flex;
+  align-items: end;
+  gap: 5px;
+  height: 26px;
+  margin-top: 2px;
+}
+
+.fs-spark-bars span {
+  display: block;
+  flex: 1;
+  min-width: 4px;
+  border-radius: 3px 3px 0 0;
+  background: linear-gradient(180deg, rgba(42, 157, 143, 0.7), rgba(42, 157, 143, 0.25));
+  animation: fs-cost 1.5s ease-out infinite alternate;
+}
+
+.fs-spark-line {
+  width: 100%;
+  height: 28px;
+}
+
+.fs-cost-path {
+  stroke: rgba(196, 92, 38, 0.7);
+  stroke-width: 1.8;
+  stroke-dasharray: 120;
+  stroke-dashoffset: 120;
+  animation: fs-cost 1.6s ease-in-out infinite;
+}
+
+.fs-conf-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.fs-conf-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  font-size: 0.54rem;
+  font-weight: 700;
+  border-radius: 4px;
+  color: rgba(17, 24, 39, 0.8);
+  background: rgba(42, 157, 143, calc(0.2 + var(--fs-c, 0.5) * 0.75));
+  animation: fs-cell 2.8s ease-in-out infinite;
+}
+
+.fs-console {
+  position: relative;
+  border-top: 1px solid var(--fs-line);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 12px;
+}
+
+.fs-console-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 8px;
+  font-size: 0.6rem;
+  letter-spacing: 0.02em;
+  line-height: 1.35;
+  border-bottom: 1px solid rgba(197, 212, 222, 0.7);
+  padding-bottom: 4px;
+}
+
+.fs-console-k {
+  color: var(--fs-warm);
+  font-weight: 700;
+}
+
+.fs-console-v {
+  color: var(--fs-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-sampler.fs-live .fs-pane-parallel {
+  border-color: var(--fs-teal);
+}
+
+.flow-sampler.fs-live .fs-burst-core {
+  animation-duration: 0.7s;
+}
+
+.flow-sampler.fs-reduced .fs-serial-draw,
+.flow-sampler.fs-reduced .fs-serial-focus,
+.flow-sampler.fs-reduced .fs-burst-ray,
+.flow-sampler.fs-reduced .fs-burst-ring,
+.flow-sampler.fs-reduced .fs-burst-core,
+.flow-sampler.fs-reduced .fs-clock-bead,
+.flow-sampler.fs-reduced .fs-clock-wave.pulse,
+.flow-sampler.fs-reduced .fs-cost-path,
+.flow-sampler.fs-reduced .fs-spark-bars span,
+.flow-sampler.fs-reduced .fs-conf-cell {
+  animation: none !important;
+}
+
+.flow-sampler.fs-reduced .fs-serial-draw {
+  stroke-dashoffset: 0;
+}
+
+.flow-sampler.fs-reduced .fs-clock-wave.pulse {
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+
+.flow-sampler.fs-reduced .fs-cost-path {
+  stroke-dashoffset: 0;
+}
+
+@keyframes fs-serial-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fs-pulse-ring {
+  0% { opacity: 0.9; transform: scale(0.85); }
+  100% { opacity: 0; transform: scale(1.55); }
+}
+
+@keyframes fs-ray-pulse {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.85; }
+}
+
+@keyframes fs-ring {
+  0% { transform: scale(0.55); opacity: 0.45; }
+  100% { transform: scale(1.15); opacity: 0; }
+}
+
+@keyframes fs-core {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+@keyframes fs-bead {
+  to { offset-distance: 100%; }
+}
+
+@keyframes fs-wave {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fs-cost {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes fs-cell {
+  0%, 100% { opacity: 0.65; }
+  50% { opacity: 1; }
+}
+
+@media (max-width: 720px) {
+  .fs-head, .fs-pane-foot {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .fs-badge-wrap {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .fs-split,
+  .fs-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+
