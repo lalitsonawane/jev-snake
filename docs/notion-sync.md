@@ -15,6 +15,7 @@ Maps repo docs to Notion [Project Knowledge Library](https://app.notion.com/p/7c
 | `docs/notes/2026-09-26-jev-drex-compare.md` | https://app.notion.com/p/3e789f54d2c28179a536c73cc3a02b88 | Session summary | Jev/Drex picker + compare |
 | `docs/notes/2026-09-26-stats-board-compare.md` | https://app.notion.com/p/3e789f54d2c281b98cf9df92eb997e47 | Session summary | Session stats board beside probs |
 | `docs/notes/2026-09-27-flow-sampler-anim.md` | https://app.notion.com/p/3e889f54d2c281538e98d60b7bc454b5 | Session summary | Flow sampler animations |
+| `docs/notes/2026-10-06-vercel-github-status-review.md` | https://app.notion.com/p/3f189f54d2c281289266ed672d9d439e | Session summary | Vercel/GitHub status review — broken main after PR #12 |
 | `docs/assets/jev-snake-architecture.jpg` | attached on architecture + README Notion pages | Graphic | System layers |
 | `docs/assets/jev-snake-endgame.jpg` | attached on endgame + README Notion pages | Graphic | End states |
 
