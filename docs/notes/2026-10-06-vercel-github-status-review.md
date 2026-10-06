@@ -21,7 +21,7 @@ Reviewed GitHub and Vercel for `lalitsonawane/jev-snake`. No open issues or PRs.
 - Open PRs: **0**
 - No `.github/workflows` (no Actions CI)
 - Latest merge: [PR #12](https://github.com/lalitsonawane/jev-snake/pull/12) — “Revert operator-efficiency UI enhancements” (`583cef7`)
-- Commit status on `main`: **Vercel FAILURE**
+- Commit status on `main`: **Vercel FAILURE** (resolved by PR #14)
 
 ### Vercel
 
@@ -44,17 +44,18 @@ Two separate corruptions:
 
 ## Fix path
 
-Applied on [PR #14](https://github.com/lalitsonawane/jev-snake/pull/14) (`lalit_cursor/restore-corrupted-ui-files-bd71`): restored both files from `160c603`. Local `npm run build` succeeded. Await merge + production Vercel READY.
+Merged via [PR #14](https://github.com/lalitsonawane/jev-snake/pull/14): restored both files from `160c603`. Docs/status review carried on [PR #13](https://github.com/lalitsonawane/jev-snake/pull/13).
 
 ## Artifacts / links
 
 - Failed prod inspect: https://vercel.com/apptonics-projects/jev-snake/EQ6LnUH9He6ceZXUZcjBGGqAiaz3
 - PR #12: https://github.com/lalitsonawane/jev-snake/pull/12
-- Fix PR: https://github.com/lalitsonawane/jev-snake/pull/14
+- Fix PR (merged): https://github.com/lalitsonawane/jev-snake/pull/14
+- Docs/status PR: https://github.com/lalitsonawane/jev-snake/pull/13
 - Production URL (SSO): https://jev-snake-theta.vercel.app
 
 ## Open follow-ups
 
-- [x] Restore `globals.css` + `SnakeApp.tsx` — [PR #14](https://github.com/lalitsonawane/jev-snake/pull/14); await merge + Vercel READY
+- [x] Restore `globals.css` + `SnakeApp.tsx` — merged in [PR #14](https://github.com/lalitsonawane/jev-snake/pull/14)
 - [ ] Optionally re-land operator-efficiency UI without swapping file contents
 - [ ] Consider a GitHub Actions `npm run build` check so broken `main` cannot merge silently
