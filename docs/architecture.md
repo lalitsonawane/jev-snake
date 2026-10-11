@@ -8,11 +8,14 @@ Repo mirror for the system design. Companion Notion page: https://app.notion.com
 
 | Layer | Path | Role |
 |-------|------|------|
-| UI | `src/components/SnakeApp.tsx` | Autoplay loop, Jev/Drex/Compare, board, probs, JSON, endgame |
+| UI | `src/components/SnakeApp.tsx` | Autoplay loop, Jev/Drex/Compare, board, probs, StatsBoard, endgame |
+| Flow UI | `src/components/FlowSampler.tsx` | Parallel Sampler–style application flow animation |
 | Rules | `src/lib/snake.ts` | Moves, legal dirs, straight-line holds, win/lose, serializeState |
-| Providers | `src/lib/systemone.ts` | Jev + Drex env, payload build, response shape |
-| API | `src/app/api/systemone-move/route.ts` | Server-only System One call (`provider: jev \| drex`) |
-| Alias | `src/app/api/jev-move/route.ts` | Jev-only alias of systemone-move |
+| Stats | `src/lib/provider-stats.ts` | Per-provider session metrics + compare agreement |
+| Providers | `src/lib/systemone.ts` | Jev + Drex env, payload build, response shape, upstream error text |
+| Route logic | `src/lib/systemone-route.ts` | Shared POST handler (503/502/499 JSON) |
+| API | `src/app/api/systemone-move/route.ts` | Unified endpoint (`provider: jev \| drex`) |
+| Alias | `src/app/api/jev-move/route.ts` | Deprecated Jev-only alias of systemone-move |
 | Host | Vercel project `jev-snake` | GitHub deploys from `main` |
 
 ## Request path
@@ -52,8 +55,24 @@ sequenceDiagram
 
 | Provider | Key | Base URL | Default base | Model |
 |----------|-----|----------|--------------|-------|
-| Jev | `TYPESAFE_API_KEY` | `TYPESAFE_BASE_URL` (optional) | `https://api.typesafe.ai` | `jev-latest` |
+| Jev | `TYPESAFE_API_KEY` (alias `TYPE_SAFE_API_KEY`) | `TYPESAFE_BASE_URL` (optional) | `https://api.typesafe.ai` | `jev-latest` |
 | Drex | `DREX_API_KEY` | `DREX_BASE_URL` (**required**) | none (`api.drex.ai` does not resolve) | `drex-latest` |
+
+`DREX_BASE_URL` must be an absolute `http(s)` System One **root**. Do not append `/v1/systemone` (stripped if present). Missing key/base → JSON `503`. Upstream DNS/connect fail → JSON `502` (not HTML 500).
+
+## Session stats + Flow Sampler
+
+```mermaid
+flowchart LR
+  Tick[Autoplay tick] --> Probs[Probability panels]
+  Tick --> Stats[Session stats board]
+  Tick --> Flow[Flow Sampler]
+  Stats --> Metrics[API · held · errors · latency · tokens · confidence]
+  Flow --> Anim[Serial zigzag · parallel pulse · console]
+```
+
+- **Stats board** — beside probs; per-provider cumulative metrics; compare agreement rate; reset on Reset / mode switch. See [stats board note](notes/2026-09-26-stats-board-compare.md).
+- **Flow Sampler** — under board/probs/stats; animates state → questions → answers → move; idle demo vs live pulse; respects `prefers-reduced-motion`. See [flow sampler note](notes/2026-09-27-flow-sampler-anim.md).
 
 ## Game rules
 
@@ -113,15 +132,22 @@ flowchart LR
   VH -->|branch / PR| Prev[Preview URL]
   EnvJ[(TYPESAFE_API_KEY)] --> Prod
   EnvD[(DREX_API_KEY)] --> Prod
+  EnvB[(DREX_BASE_URL)] --> Prod
   EnvJ --> Prev
   EnvD --> Prev
+  EnvB --> Prev
 ```
 
 ## Related notes
 
-- [2026-09-26 Jev / Drex compare](notes/2026-09-26-jev-drex-compare.md)
+- [2026-09-26 Jev / Drex compare](notes/2026-09-26-jev-drex-compare.md) (PR #8)
+- [2026-09-26 Drex base URL required](notes/2026-09-26-drex-base-url-required.md) (PR #9)
+- [2026-09-26 Session stats board](notes/2026-09-26-stats-board-compare.md) (PR #10)
+- [2026-09-27 Flow Sampler](notes/2026-09-27-flow-sampler-anim.md) (PR #11)
+- [2026-10-11 Docs sync PRs #8–#11](notes/2026-10-11-docs-sync-pr8-11.md)
 - [2026-09-23 Vercel GitHub link](notes/2026-09-23-vercel-github-link.md)
 - [2026-09-23 Documentation refresh](notes/2026-09-23-docs-architecture.md)
 - [2026-09-23 Straight-line hold](notes/2026-09-23-straight-line-hold.md)
 - [2026-09-23 Idle auto-pause](notes/2026-09-23-idle-auto-pause.md)
 - [2026-09-23 Endgame self-crash](notes/2026-09-23-endgame-self-crash.md)
+- [2026-09-23 Cancel upstream on abort](notes/2026-09-23-cancel-upstream-jev-abort.md)
