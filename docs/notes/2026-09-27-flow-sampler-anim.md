@@ -1,9 +1,13 @@
 # 2026-09-27 — Jev One — flow sampler animations
 
+Repo mirror: `docs/notes/2026-09-27-flow-sampler-anim.md`
+
 ## Outcome
-Added a **Flow Sampler** panel under the board / probs / session-stats region that animates the real System One application flow (state → questions → answers/probabilities → move), visually matching the Parallel Sampler lab aesthetic (teal + warm accent, grid, sequential vs parallel).
+
+Merged [PR #11](https://github.com/lalitsonawane/jev-snake/pull/11): a **Flow Sampler** panel under the board / probs / session-stats region that animates the real System One application flow (state → questions → answers/probabilities → move), visually matching the Parallel Sampler lab aesthetic (teal + warm accent, grid, sequential vs parallel).
 
 ## What animates and when
+
 | Piece | Idle / demo | Live tick |
 |-------|-------------|-----------|
 | Sequential zigzag + serial clock | Looping contrast (LLM-style one-token path) | Continues as contrast |
@@ -14,10 +18,12 @@ Added a **Flow Sampler** panel under the board / probs / session-stats region th
 `prefers-reduced-motion: reduce` freezes CSS motion (static frames).
 
 ## Artifacts
+
 - `src/components/FlowSampler.tsx`
 - CSS: `.flow-sampler` in `globals.css`
 - Wired in `SnakeApp.tsx` below main grid, above JSON panel
-- Media: `/cursor/stores/self/media/flow-sampler-panel.png`, `flow-sampler-jev.png`, `flow-sampler-compare.png`, `flow-sampler-demo.mp4`
+- PR: https://github.com/lalitsonawane/jev-snake/pull/11
 
 ## Open follow-ups
-- None required for Drex host / logic gates (out of scope).
+
+- None required for Drex host / invented logic-gate metrics (out of scope).
