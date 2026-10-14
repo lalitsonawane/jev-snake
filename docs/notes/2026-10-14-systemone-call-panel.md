@@ -24,6 +24,7 @@ The snake autoplay loop, probabilities, and session stats were working. The “L
 
 ## Artifacts / links
 
+- PR: https://github.com/lalitsonawane/jev-snake/pull/16
 - `src/lib/call-view.ts`
 - `src/lib/call-view.test.ts`
 - `src/components/SnakeApp.tsx`
