@@ -4,18 +4,20 @@ Maps repo docs to Notion [Project Knowledge Library](https://app.notion.com/p/7c
 
 | Repo path | Notion page | Type | Notes |
 |-----------|-------------|------|-------|
-| `README.md` | https://app.notion.com/p/3e289f54d2c281a59b5dea24e51a80ff | Reference / Session | Operator entry + Mermaid overview + graphics |
-| `docs/architecture.md` | https://app.notion.com/p/3e489f54d2c281fba90dda670039ba34 | Reference | Deep Mermaid flows + architecture graphic |
+| `README.md` | https://app.notion.com/p/3e289f54d2c281a59b5dea24e51a80ff | Reference / Session | Operator entry + Mermaid + stats + Flow Sampler |
+| `docs/architecture.md` | https://app.notion.com/p/3e489f54d2c281fba90dda670039ba34 | Reference | Deep Mermaid flows + providers + stats/flow |
 | `docs/notes/2026-09-23-docs-architecture.md` | https://app.notion.com/p/3e489f54d2c281b0bc7ddbaa1f28ec07 | Session summary | Documentation refresh |
 | `docs/notes/2026-09-23-vercel-github-link.md` | https://app.notion.com/p/3e489f54d2c28126b5c6cbba3fb96f2c | Session summary | GitHub link + env migration + Mermaid |
 | `docs/notes/2026-09-23-straight-line-hold.md` | https://app.notion.com/p/3e489f54d2c28155845cffae4928b037 | Session summary | Hold latency / PR #4 + Mermaid |
 | `docs/notes/2026-09-23-idle-auto-pause.md` | https://app.notion.com/p/3e489f54d2c2815eb106df70dbfe03c3 | Session summary | 1-min idle / PR #5 + Mermaid |
 | `docs/notes/2026-09-23-endgame-self-crash.md` | https://app.notion.com/p/3e489f54d2c281a69a1fd78bf1458b05 | Session summary | Classic self-crash / PR #6 + graphic |
 | `docs/notes/2026-09-23-cancel-upstream-jev-abort.md` | https://app.notion.com/p/3e489f54d2c2814cbebdfc97ac914ca2 | Session summary | AbortSignal plumbing / PR #7 |
-| `docs/notes/2026-09-26-jev-drex-compare.md` | https://app.notion.com/p/3e789f54d2c28179a536c73cc3a02b88 | Session summary | Jev/Drex picker + compare |
-| `docs/notes/2026-09-26-stats-board-compare.md` | https://app.notion.com/p/3e789f54d2c281b98cf9df92eb997e47 | Session summary | Session stats board beside probs |
-| `docs/notes/2026-09-27-flow-sampler-anim.md` | https://app.notion.com/p/3e889f54d2c281538e98d60b7bc454b5 | Session summary | Flow sampler animations |
+| `docs/notes/2026-09-26-jev-drex-compare.md` | https://app.notion.com/p/3e789f54d2c28179a536c73cc3a02b88 | Session summary | Jev/Drex picker + compare (PR #8) |
+| `docs/notes/2026-09-26-drex-base-url-required.md` | https://app.notion.com/p/3f689f54d2c281f8914ee1eb37fd7fb8 | Session summary | Required `DREX_BASE_URL` + JSON 502 (PR #9) |
+| `docs/notes/2026-09-26-stats-board-compare.md` | https://app.notion.com/p/3e789f54d2c281b98cf9df92eb997e47 | Session summary | Session stats board (PR #10) |
+| `docs/notes/2026-09-27-flow-sampler-anim.md` | https://app.notion.com/p/3e889f54d2c281538e98d60b7bc454b5 | Session summary | Flow sampler animations (PR #11) |
 | `docs/notes/2026-10-06-vercel-github-status-review.md` | https://app.notion.com/p/3f189f54d2c281289266ed672d9d439e | Session summary | Vercel/GitHub status review — broken main after PR #12 |
+| `docs/notes/2026-10-11-docs-sync-pr8-11.md` | https://app.notion.com/p/3f689f54d2c28125b51cf0dad1d97275 | Session summary | Docs sync for merged PRs #8–#11 |
 | `docs/assets/jev-snake-architecture.jpg` | attached on architecture + README Notion pages | Graphic | System layers |
 | `docs/assets/jev-snake-endgame.jpg` | attached on endgame + README Notion pages | Graphic | End states |
 
