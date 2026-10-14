@@ -18,6 +18,7 @@ Maps repo docs to Notion [Project Knowledge Library](https://app.notion.com/p/7c
 | `docs/notes/2026-09-27-flow-sampler-anim.md` | https://app.notion.com/p/3e889f54d2c281538e98d60b7bc454b5 | Session summary | Flow sampler animations (PR #11) |
 | `docs/notes/2026-10-06-vercel-github-status-review.md` | https://app.notion.com/p/3f189f54d2c281289266ed672d9d439e | Session summary | Vercel/GitHub status review — broken main after PR #12 |
 | `docs/notes/2026-10-11-docs-sync-pr8-11.md` | https://app.notion.com/p/3f689f54d2c28125b51cf0dad1d97275 | Session summary | Docs sync for merged PRs #8–#11 |
+| `docs/notes/2026-10-14-systemone-call-panel.md` | https://app.notion.com/p/3f989f54d2c2810ca0d9ec3f1fef726d | Session summary | Last System One call panel showed null head/food |
 | `docs/assets/jev-snake-architecture.jpg` | attached on architecture + README Notion pages | Graphic | System layers |
 | `docs/assets/jev-snake-endgame.jpg` | attached on endgame + README Notion pages | Graphic | End states |
 
