@@ -35,6 +35,7 @@ import {
   type SessionStats,
 } from "@/lib/provider-stats";
 import { FlowSampler } from "@/components/FlowSampler";
+import { buildCallView } from "@/lib/call-view";
 
 type ModelResponse = {
   model?: string;
@@ -120,63 +121,6 @@ function choiceLabel(
   if (held) return `held: ${chosen || "—"} · cached ${providerLabel}`;
   if (!chosen) return "choice: —";
   return chosenPct ? `choice: ${chosen} (${chosenPct})` : `choice: ${chosen}`;
-}
-
-function asPair(v: unknown): [number, number] | null {
-  if (
-    Array.isArray(v) &&
-    v.length >= 2 &&
-    typeof v[0] === "number" &&
-    typeof v[1] === "number"
-  ) {
-    return [v[0], v[1]];
-  }
-  return null;
-}
-
-/** Compact view of last System One I/O for the JSON panel. */
-function buildCallView(tick: ModelTick | null): {
-  head: [number, number] | null;
-  food: [number, number] | null;
-  payload: Record<string, unknown> | null;
-} {
-  if (!tick) return { head: null, food: null, payload: null };
-  const req = (
-    tick.request && typeof tick.request === "object" ? tick.request : {}
-  ) as Record<string, unknown>;
-  const res = tick.response || {};
-  const head = asPair(req.head);
-  const food = asPair(req.food);
-  const dx = typeof req.food_dx === "number" ? req.food_dx : null;
-  const dy = typeof req.food_dy === "number" ? req.food_dy : null;
-  const legal = Array.isArray(req.legal)
-    ? (req.legal as string[])
-    : Array.isArray(tick.legal)
-      ? tick.legal
-      : [];
-
-  const state: Record<string, unknown> = {
-    head: head ?? req.head ?? null,
-    food: food ?? req.food ?? null,
-    food_delta: dx != null && dy != null ? [dx, dy] : null,
-    safe_moves: legal,
-  };
-
-  const move: Record<string, unknown> = {
-    choice: res.choice ?? null,
-    confidence: typeof res.confidence === "number" ? res.confidence : null,
-  };
-
-  return {
-    head,
-    food,
-    payload: {
-      provider: tick.provider,
-      model: res.model ?? null,
-      state,
-      move,
-    },
-  };
 }
 
 function highlightJson(value: unknown): string {
