@@ -37,6 +37,26 @@ function game(overrides: Partial<Game> = {}): Game {
 describe("straightShotSteps", () => {
   it("returns the remaining steps for a clear collinear target", () => {
     expect(straightShotSteps(game(), "right")).toBe(4);
+    expect(straightShotSteps(game({ food: { x: 2, y: 0 } }), "up")).toBe(3);
+    expect(straightShotSteps(game({ food: { x: 2, y: 7 } }), "down")).toBe(4);
+    expect(
+      straightShotSteps(
+        game({
+          dir: "left",
+          snake: [
+            { x: 5, y: 3 },
+            { x: 6, y: 3 },
+            { x: 6, y: 4 },
+          ],
+          food: { x: 2, y: 3 },
+        }),
+        "left",
+      ),
+    ).toBe(3);
+  });
+
+  it("returns one when food is in the adjacent cell", () => {
+    expect(straightShotSteps(game({ food: { x: 3, y: 3 } }), "right")).toBe(1);
   });
 
   it("rejects a direction that does not point exactly at the food", () => {
@@ -54,6 +74,18 @@ describe("straightShotSteps", () => {
     });
 
     expect(straightShotSteps(blocked, "right")).toBeNull();
+  });
+
+  it("conservatively rejects a corridor occupied by the current tail", () => {
+    const tailAhead = game({
+      snake: [
+        { x: 2, y: 3 },
+        { x: 2, y: 4 },
+        { x: 4, y: 3 },
+      ],
+    });
+
+    expect(straightShotSteps(tailAhead, "right")).toBeNull();
   });
 
   it("rejects terminal games and games without food", () => {

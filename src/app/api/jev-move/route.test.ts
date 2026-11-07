@@ -24,6 +24,7 @@ describe("POST /api/jev-move abort plumbing", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+    vi.useRealTimers();
     if (prevKey === undefined) delete process.env.TYPESAFE_API_KEY;
     else process.env.TYPESAFE_API_KEY = prevKey;
     if (prevAlias === undefined) delete process.env.TYPE_SAFE_API_KEY;
@@ -105,5 +106,37 @@ describe("POST /api/jev-move abort plumbing", () => {
 
     expect(res.status).toBe(499);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("stops an upstream request after the timeout", async () => {
+    vi.useFakeTimers();
+    process.env.TYPESAFE_API_KEY = "test-key";
+    let resolveStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+        resolveStarted();
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new DOMException("The operation was aborted.", "AbortError")),
+            { once: true },
+          );
+        });
+      }),
+    );
+
+    const pending = POST(moveRequest());
+    await started;
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    const res = await pending;
+    expect(res.status).toBe(504);
+    await expect(res.json()).resolves.toMatchObject({
+      error: "Jev request timed out",
+    });
   });
 });
