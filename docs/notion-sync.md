@@ -9,6 +9,7 @@ Maps repo docs to Notion [Project Knowledge Library](https://app.notion.com/p/7c
 | `docs/notes/2026-09-23-docs-architecture.md` | https://app.notion.com/p/3e489f54d2c281b0bc7ddbaa1f28ec07 | Session summary | Documentation refresh |
 | `docs/notes/2026-09-23-vercel-github-link.md` | https://app.notion.com/p/3e489f54d2c28126b5c6cbba3fb96f2c | Session summary | GitHub link + env migration + Mermaid |
 | `docs/notes/2026-09-23-straight-line-hold.md` | https://app.notion.com/p/3e489f54d2c28155845cffae4928b037 | Session summary | Hold latency / PR #4 + Mermaid |
+| `docs/notes/2026-11-07-straight-line-autoplay-hold.md` | https://app.notion.com/p/41189f54d2c281e1b062e7a8fd352aa1 | Session summary | Follow-up cancellation, cadence, tests, and verification |
 | `docs/notes/2026-09-23-idle-auto-pause.md` | https://app.notion.com/p/3e489f54d2c2815eb106df70dbfe03c3 | Session summary | 1-min idle / PR #5 + Mermaid |
 | `docs/notes/2026-09-23-endgame-self-crash.md` | https://app.notion.com/p/3e489f54d2c281a69a1fd78bf1458b05 | Session summary | Classic self-crash / PR #6 + graphic |
 | `docs/notes/2026-09-23-cancel-upstream-jev-abort.md` | https://app.notion.com/p/3e489f54d2c2814cbebdfc97ac914ca2 | Session summary | AbortSignal plumbing / PR #7 |
