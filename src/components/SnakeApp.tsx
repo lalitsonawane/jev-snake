@@ -267,7 +267,7 @@ export default function SnakeApp() {
   const requestRef = useRef<AbortController | null>(null);
   const runVersionRef = useRef(0);
   const tickMsRef = useRef(DEFAULT_TICK_MS);
-  const lastActiveRef = useRef(Date.now());
+  const lastActiveRef = useRef(0);
   const gearRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
