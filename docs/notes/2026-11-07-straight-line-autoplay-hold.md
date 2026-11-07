@@ -7,7 +7,7 @@ ahead through a clear body-free corridor. Intermediate held ticks do not call
 `/api/jev-move`; turns, new food, unsafe corridors, and lifecycle changes return
 control to Jev.
 
-Repo mirror: `docs/notes/2026-11-07-straight-line-autoplay-hold.md`  
+Repo mirror: `docs/notes/2026-11-07-straight-line-autoplay-hold.md`
 Notion: https://app.notion.com/p/41189f54d2c281e1b062e7a8fd352aa1
 
 ## Key decisions
