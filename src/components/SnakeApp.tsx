@@ -70,8 +70,10 @@ type StraightHold = {
 
 /** Default visual cadence. Network time counts toward this target interval. */
 const DEFAULT_TICK_MS = 90;
-/** Stop hidden/idle autoplay before it can spend unattended tokens. */
-const AUTOPLAY_IDLE_MS = 60_000;
+/** Browser-safe upper bound that also keeps the cadence control practical. */
+const MAX_TICK_MS = 60_000;
+/** Stop hidden/idle autoplay before it can spend unattended API tokens. */
+const AUTOPLAY_IDLE_MS = 90_000;
 const DIR_SET: ReadonlySet<string> = new Set(ALL_DIRS);
 
 type PlayMode = "jev" | "drex" | "compare";
@@ -264,6 +266,7 @@ export default function SnakeApp() {
   const holdRef = useRef<StraightHold | null>(null);
   const requestRef = useRef<AbortController | null>(null);
   const runVersionRef = useRef(0);
+  const tickMsRef = useRef(DEFAULT_TICK_MS);
   const lastActiveRef = useRef(Date.now());
   const gearRef = useRef<HTMLDivElement | null>(null);
 
@@ -587,7 +590,7 @@ export default function SnakeApp() {
         const startedAt = performance.now();
         const ok = await step(runVersion);
         if (!ok || cancelled || !runningRef.current) break;
-        const waitMs = Math.max(0, tickMs - (performance.now() - startedAt));
+        const waitMs = Math.max(0, tickMsRef.current - (performance.now() - startedAt));
         if (waitMs > 0) {
           await new Promise<void>((resolve) => {
             wakeTimeout = resolve;
@@ -609,7 +612,7 @@ export default function SnakeApp() {
         busyRef.current = false;
       }
     };
-  }, [running, tickMs, step]);
+  }, [running, step]);
 
   const toggleRun = () => {
     if (game.status !== "playing") return;
@@ -811,10 +814,17 @@ export default function SnakeApp() {
                     type="number"
                     value={tickMs}
                     min={0}
+                    max={MAX_TICK_MS}
                     step={10}
-                    onChange={(e) =>
-                      setTickMs(Math.max(0, Number(e.target.value) || 0))
-                    }
+                    onChange={(e) => {
+                      const value = Number(e.target.value);
+                      const nextTickMs =
+                        Number.isFinite(value)
+                          ? Math.min(MAX_TICK_MS, Math.max(0, value))
+                          : DEFAULT_TICK_MS;
+                      tickMsRef.current = nextTickMs;
+                      setTickMs(nextTickMs);
+                    }}
                     title="Target milliseconds per move; API request time counts toward it"
                   />
                   <span className="muted">ms</span>

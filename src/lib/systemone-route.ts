@@ -9,6 +9,8 @@ import {
   type ProviderId,
 } from "@/lib/systemone";
 
+const SYSTEMONE_TIMEOUT_MS = 20_000;
+
 export async function handleSystemOneMove(
   req: NextRequest,
   defaultProvider: ProviderId = "jev",
@@ -49,6 +51,15 @@ export async function handleSystemOneMove(
   }
 
   const t0 = performance.now();
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortUpstream = () => controller.abort(req.signal.reason);
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, SYSTEMONE_TIMEOUT_MS);
+  req.signal.addEventListener("abort", abortUpstream, { once: true });
+
   let res: Response;
   try {
     res = await fetch(endpoint, {
@@ -58,14 +69,20 @@ export async function handleSystemOneMove(
         "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
-      signal: req.signal,
+      signal: controller.signal,
     });
   } catch (err) {
-    if (
-      req.signal.aborted ||
-      (err instanceof Error && err.name === "AbortError")
-    ) {
+    if (req.signal.aborted) {
       return new NextResponse(null, { status: 499 });
+    }
+    if (timedOut) {
+      return NextResponse.json(
+        {
+          error: `${config.label} request timed out`,
+          provider: providerId,
+        },
+        { status: 504 },
+      );
     }
     // Upstream DNS/connect failures must be JSON — a bare throw becomes HTML 500
     // and Safari surfaces that as "The string did not match the expected pattern"
@@ -84,6 +101,9 @@ export async function handleSystemOneMove(
       },
       { status: 502 },
     );
+  } finally {
+    clearTimeout(timeoutId);
+    req.signal.removeEventListener("abort", abortUpstream);
   }
   const latencyMs = Math.round(performance.now() - t0);
   const text = await res.text();
