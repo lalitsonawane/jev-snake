@@ -46,7 +46,8 @@ describe("SnakeApp autoplay", () => {
   });
 
   it("reuses a straight Jev choice until food and then requests a new decision", async () => {
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+    const fetchMock = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      void args;
       const call = fetchMock.mock.calls.length;
       const choice = call <= 5 ? "right" : call === 6 ? "down" : "left";
       return jevResult(choice);
@@ -70,10 +71,12 @@ describe("SnakeApp autoplay", () => {
   it("aborts and ignores an in-flight response when paused", async () => {
     let resolveFetch: ((result: FetchResult) => void) | undefined;
     const fetchMock = vi.fn(
-      (_input: RequestInfo | URL, _init?: RequestInit) =>
-        new Promise<FetchResult>((resolve) => {
+      (...args: Parameters<typeof fetch>) => {
+        void args;
+        return new Promise<FetchResult>((resolve) => {
           resolveFetch = resolve;
-        }),
+        });
+      },
     );
     vi.stubGlobal("fetch", fetchMock);
 
