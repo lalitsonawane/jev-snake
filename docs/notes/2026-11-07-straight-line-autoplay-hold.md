@@ -23,22 +23,23 @@ Notion: https://app.notion.com/p/41189f54d2c281e1b062e7a8fd352aa1
   continuous.
 - Keep the last real Jev request and response in the panels. Add a held/no-API
   indicator and display held latency as 0 ms instead of fabricating a payload.
-- Propagate client cancellation through the API proxy to TypeSafe and apply a
-  20 second upstream timeout. Cadence edits update a ref and no longer restart
-  an in-flight request.
+- Propagate client cancellation through the shared System One proxy and apply a
+  20 second upstream timeout for Jev and Drex. Cadence edits update a ref and no
+  longer restart an in-flight request.
 - Preserve the 90 second idle and hidden-tab autostop and board-fill win rule.
 
 ## Artifacts / links
 
-- Pull request: https://github.com/lalitsonawane/jev-snake/pull/4
+- Original feature: https://github.com/lalitsonawane/jev-snake/pull/4
+- Lifecycle hardening: https://github.com/lalitsonawane/jev-snake/pull/17
 - `src/lib/snake.ts` — conservative straight-shot eligibility
 - `src/components/SnakeApp.tsx` — hold lifecycle, cadence, cancellation, and UI
-- `src/app/api/jev-move/route.ts` — upstream abort propagation and timeout
+- `src/lib/systemone-route.ts` — upstream abort propagation and timeout
 - `src/components/SnakeApp.test.tsx` — call-count and pause-abort tests
 
 ## Verification
 
-- `npm test`: 3 files, 9 tests passed.
+- `npm test`: 7 files, 37 tests passed.
 - `npm run lint`: passed.
 - `npm run build`: passed with Next.js 16.4.5.
 - `npm audit --omit=dev`: zero production vulnerabilities.
