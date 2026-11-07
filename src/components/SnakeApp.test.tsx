@@ -7,20 +7,23 @@ import SnakeApp from "./SnakeApp";
 
 type FetchResult = {
   ok: boolean;
-  json: () => Promise<unknown>;
+  status: number;
+  text: () => Promise<string>;
 };
 
 function jevResult(choice: string): FetchResult {
+  const body = {
+    request: {},
+    response: {
+      choice,
+      probabilities: { [choice]: 1 },
+    },
+    latencyMs: 0,
+  };
   return {
     ok: true,
-    json: async () => ({
-      request: {},
-      response: {
-        choice,
-        probabilities: { [choice]: 1 },
-      },
-      latencyMs: 0,
-    }),
+    status: 200,
+    text: async () => JSON.stringify(body),
   };
 }
 
@@ -37,6 +40,14 @@ function currentStep() {
 describe("SnakeApp autoplay", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
   });
 
   afterEach(() => {

@@ -254,8 +254,8 @@ export const FlowSampler = memo(function FlowSampler({
   useEffect(() => {
     if (reduced) return;
     if (live) {
-      setPulse((p) => p + 1);
-      return;
+      const id = window.setTimeout(() => setPulse((pulse) => pulse + 1), 0);
+      return () => window.clearTimeout(id);
     }
     const id = window.setInterval(() => {
       setPulse((p) => p + 1);

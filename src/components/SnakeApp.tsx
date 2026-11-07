@@ -239,15 +239,18 @@ export default function SnakeApp() {
 
   // Optional deep-link: ?mode=jev|drex|compare
   useEffect(() => {
-    try {
-      const m = new URLSearchParams(window.location.search).get("mode");
-      if (m === "jev" || m === "drex" || m === "compare") {
-        setPlayMode(m);
-        if (m !== "compare") setDriveWith(m);
+    const id = window.setTimeout(() => {
+      try {
+        const mode = new URLSearchParams(window.location.search).get("mode");
+        if (mode === "jev" || mode === "drex" || mode === "compare") {
+          setPlayMode(mode);
+          if (mode !== "compare") setDriveWith(mode);
+        }
+      } catch {
+        // Ignore malformed browser URL state and keep the default provider.
       }
-    } catch {
-      /* ignore */
-    }
+    }, 0);
+    return () => window.clearTimeout(id);
   }, []);
   const [gearOpen, setGearOpen] = useState(false);
   const [ticks, setTicks] = useState<Partial<Record<ProviderId, ModelTick>>>({});
