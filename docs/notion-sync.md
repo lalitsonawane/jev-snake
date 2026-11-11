@@ -4,7 +4,8 @@ Maps repo docs to Notion [Project Knowledge Library](https://app.notion.com/p/7c
 
 | Repo path | Notion page | Type | Notes |
 |-----------|-------------|------|-------|
-| `README.md` | https://app.notion.com/p/3e289f54d2c281a59b5dea24e51a80ff | Reference / Session | Operator entry + Mermaid + stats + Flow Sampler |
+| `README.md` | https://app.notion.com/p/3e289f54d2c281a59b5dea24e51a80ff | Reference / Session | Operator entry + How to play + Mermaid + stats + Flow Sampler |
+| `docs/notes/2026-11-11-how-to-play.md` | https://app.notion.com/p/41589f54d2c2814385ecc489b31423df | How-to | Controls and shortcuts as implemented in SnakeApp |
 | `docs/architecture.md` | https://app.notion.com/p/3e489f54d2c281fba90dda670039ba34 | Reference | Deep Mermaid flows + providers + stats/flow |
 | `docs/notes/2026-09-23-docs-architecture.md` | https://app.notion.com/p/3e489f54d2c281b0bc7ddbaa1f28ec07 | Session summary | Documentation refresh |
 | `docs/notes/2026-09-23-vercel-github-link.md` | https://app.notion.com/p/3e489f54d2c28126b5c6cbba3fb96f2c | Session summary | GitHub link + env migration + Mermaid |

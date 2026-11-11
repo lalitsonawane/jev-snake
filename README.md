@@ -4,6 +4,28 @@ Snake autoplay where **every move decision** is a live System One Choice via `PO
 
 ![Architecture overview](docs/assets/jev-snake-architecture.jpg)
 
+## How to play
+
+Model autoplay only. You start, pause, and reset the session. You do not steer the snake. There are **no keyboard shortcuts** for start, pause, reset, or direction. Arrow keys, Space, and letters do not change the game. Any keydown only counts as activity for the idle timer, the same as a click, mouse move, or scroll.
+
+The board opens **Idle**. **Start** is enabled only while the game status is `playing`. After a win or loss it stays disabled until you reset. Reset does not auto-start.
+
+| Control | What it does |
+|---------|----------------|
+| **Start** | Header button while autoplay is stopped. Clears the error banner and starts the tick loop. |
+| **Pause** | Same button while running. Stops the loop, aborts the in-flight `POST /api/systemone-move`, and clears a straight-line hold. The board is unchanged. |
+| **Reset** | Header **Reset**. Stops autoplay, clears the error, move panels, and session stats, and deals a new board. |
+| **Play again** | Endgame card. Same action as **Reset**. |
+| **Jev / Drex / Compare** | Chips under the header, or the ⚙ **Model** radios. Switching stops autoplay and clears panels, session stats, and the error. Compare’s driver starts as Jev. |
+| **Switch driver** | Compare only: the “switch driver” link, or ⚙ **Drive moves with**. Stops autoplay and changes which model’s choice moves the snake. |
+| **⚙ Settings** | Model, driver (Compare only), **Batch foresight**, and **Cadence**. Click outside the menu to close it. Batch foresight and cadence do not stop a running game. Cadence is the target milliseconds per move (default **90**, clamped to **0–60000**, step **10**). Request time counts toward that interval. |
+| **Deep link** | `?mode=jev`, `?mode=drex`, or `?mode=compare` on load. Anything else is ignored. |
+
+Autoplay also stops on its own:
+
+- **Hidden tab** — stops immediately. Banner: “Autoplay stopped — tab hidden (saves API tokens). Hit Start to resume.”
+- **Idle** — no pointer, key, mouse move, or scroll for **90 seconds** (`AUTOPLAY_IDLE_MS`), checked every 5 seconds. The banner text says “1 min idle”; the timer is 90 seconds. **Start** resumes the same board.
+
 ## Live
 
 | | |
@@ -197,4 +219,5 @@ GitHub-linked project: `lalitsonawane/jev-snake` → [apptonics-projects/jev-sna
 | [docs/notes/2026-09-26-drex-base-url-required.md](docs/notes/2026-09-26-drex-base-url-required.md) | PR #9 — required `DREX_BASE_URL` + JSON 502 |
 | [docs/notes/2026-09-26-stats-board-compare.md](docs/notes/2026-09-26-stats-board-compare.md) | PR #10 — session stats board |
 | [docs/notes/2026-09-27-flow-sampler-anim.md](docs/notes/2026-09-27-flow-sampler-anim.md) | PR #11 — Flow Sampler |
+| [docs/notes/2026-11-11-how-to-play.md](docs/notes/2026-11-11-how-to-play.md) | Controls and shortcuts (How to play) |
 | [docs/notes/](docs/notes/) | All session / decision mirrors |
